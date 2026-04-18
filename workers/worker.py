@@ -340,9 +340,9 @@ async def main():
     terminated = asyncio.Event()
     force_kill = False
 
-    @sio.on("connect")
-    async def on_connect():
-        print("🔌 Connected to socket server", flush=True)
+    print("🔌 Connected to socket server", flush=True)
+    # Give the user immediate feedback that the worker has started
+    await emit("agent:thinking", {"action": "Initializing worker", "detail": "Starting secure sandbox environment..."})
 
     @sio.on("disconnect")
     async def on_disconnect():
@@ -396,11 +396,14 @@ async def main():
         if not desktop:
             print("🚀 Spawning new E2B sandbox...", flush=True)
             desktop = Sandbox.create(timeout=3600)
+            # Emit sandbox_ready IMMEDIATELY - don't wait for stream
+            await emit("agent:sandbox_ready", {"sandboxId": desktop.sandbox_id})
+            
+            print(f"✅ Sandbox created: {desktop.sandbox_id}. Initializing stream...", flush=True)
             desktop.stream.start()
             stream_url = desktop.stream.get_url()
-            await emit("agent:sandbox_ready", {"sandboxId": desktop.sandbox_id})
             await emit("agent:stream_ready", {"streamUrl": stream_url})
-            print(f"✅ Sandbox booted: {desktop.sandbox_id}", flush=True)
+            print(f"✅ Stream active at {stream_url}", flush=True)
             
     except Exception as e:
         print(f"❌ CRITICAL ERROR: Failed to boot/reconnect sandbox: {e}", flush=True)
