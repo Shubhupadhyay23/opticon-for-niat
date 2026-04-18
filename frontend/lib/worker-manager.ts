@@ -44,7 +44,7 @@ export function spawnWorkers(sessionId: string, agentCount: number): void {
         SESSION_ID: sessionId,
         AGENT_ID: agentId,
         USER_ID: session.userId || "",
-        SOCKET_URL: `http://localhost:${process.env.PORT || "3000"}`,
+        SOCKET_URL: `http://127.0.0.1:${process.env.PORT || "3000"}`,
         E2B_API_KEY: process.env.E2B_API_KEY || "",
         DEDALUS_API_KEY: process.env.DEDALUS_API_KEY || "",
         // Panopticon: Enable long-running mode for Panopticon sessions
@@ -98,7 +98,7 @@ export function respawnWorker(sessionId: string, agent: Agent): void {
       SESSION_ID: sessionId,
       AGENT_ID: agent.id,
       USER_ID: session.userId || "",
-      SOCKET_URL: `http://localhost:${process.env.PORT || "3000"}`,
+      SOCKET_URL: `http://127.0.0.1:${process.env.PORT || "3000"}`,
       E2B_API_KEY: process.env.E2B_API_KEY || "",
       DEDALUS_API_KEY: process.env.DEDALUS_API_KEY || "",
       SANDBOX_ID: agent.sandboxId || "",

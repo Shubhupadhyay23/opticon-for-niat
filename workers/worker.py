@@ -61,7 +61,14 @@ async def call_with_retry(client, **kwargs):
     """Call client.chat.completions.create() with exponential backoff on failure."""
     for attempt in range(MAX_RETRIES):
         try:
-            return await client.chat.completions.create(**kwargs)
+            logger.info("  (attempt %d/%d) Calling LLM...", attempt + 1, MAX_RETRIES)
+            response = await asyncio.wait_for(client.chat.completions.create(**kwargs), timeout=60.0)
+            logger.info("✅ LLM response received")
+            return response
+        except asyncio.TimeoutError:
+            logger.error("LLM call timed out after 60s")
+            if attempt == MAX_RETRIES - 1:
+                raise
         except Exception as e:
             if attempt == MAX_RETRIES - 1:
                 raise
@@ -432,7 +439,7 @@ async def main():
                 "agent:thinking",
                 {"action": "Starting task", "detail": task_description},
             )
-            logger.info("Starting task %s: %s", task_id, task_description)
+            logger.info("🚀 Agent execution started for task %s: %s", task_id, task_description)
 
             # Retrieve user memories for context
             user_memories = ""

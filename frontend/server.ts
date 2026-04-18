@@ -273,6 +273,7 @@ app.prepare().then(() => {
       // Send task to the specific worker socket
       const whiteboard = getWhiteboard(sessionId);
       const room = `session:${sessionId}`;
+      console.log(`[server] Assigning task ${nextTask.id} to agent ${agent.id}`);
       io.to(room).emit("task:assign", {
         taskId: nextTask.id,
         description: nextTask.description,
@@ -452,7 +453,8 @@ app.prepare().then(() => {
           todoId: nextTask.id,
           agentId,
         });
-
+        
+        console.log(`[server] Assigning initial task ${nextTask.id} to agent ${agentId}`);
         // Send task to worker
         const whiteboard = getWhiteboard(sessionId);
         socket.emit("task:assign", {
@@ -460,6 +462,8 @@ app.prepare().then(() => {
           description: nextTask.description,
           whiteboard,
         });
+      } else {
+        console.log(`[server] No pending tasks for agent ${agentId} on stream_ready`);
       }
       // Agent idles if no pending tasks — don't terminate
     });
