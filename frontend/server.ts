@@ -543,7 +543,7 @@ app.prepare().then(() => {
       });
     });
 
-    socket.on("agent:thumbnail", (data: AgentThumbnailEvent & { sessionId: string }) => {
+    socket.on("agent:thumbnail", (data: AgentThumbnailEvent) => {
       const { sessionId } = data;
       if (!sessionId) return;
 
@@ -594,7 +594,7 @@ app.prepare().then(() => {
       console.log(`[server] Agent ${agentId} sandbox expired`);
     });
 
-    socket.on("agent:checkpoint", (data: AgentCheckpointEvent & { sessionId: string }) => {
+    socket.on("agent:checkpoint", (data: AgentCheckpointEvent) => {
       const { sessionId } = data;
       if (!sessionId) return;
 

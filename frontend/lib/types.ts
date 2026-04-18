@@ -136,6 +136,7 @@ export interface AgentSandboxExpiredEvent {
 }
 
 export interface AgentCheckpointEvent {
+  sessionId: string;
   agentId: string;
   step: number;
   totalSteps: number;
@@ -266,6 +267,7 @@ export interface ReplayReadyEvent {
 // --- Dashboard + Thumbnail types ---
 
 export interface AgentThumbnailEvent {
+  sessionId: string;
   agentId: string;
   thumbnail: string;
 }
