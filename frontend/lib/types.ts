@@ -65,12 +65,14 @@ export interface TaskAssignedEvent {
 }
 
 export interface TaskCompletedEvent {
+  sessionId: string;
   todoId: string;
   agentId: string;
   result?: string;
 }
 
 export interface AgentThinkingEvent {
+  sessionId: string;
   agentId: string;
   action: string;
   timestamp: string;
@@ -81,6 +83,7 @@ export interface AgentThinkingEvent {
 }
 
 export interface AgentReasoningEvent {
+  sessionId: string;
   agentId: string;
   reasoning: string;
   timestamp: string;
@@ -88,6 +91,7 @@ export interface AgentReasoningEvent {
 }
 
 export interface AgentStreamReadyEvent {
+  sessionId: string;
   agentId: string;
   streamUrl: string;
 }
@@ -98,30 +102,36 @@ export interface AgentJoinEvent {
 }
 
 export interface AgentErrorEvent {
+  sessionId: string;
   agentId: string;
   error: string;
 }
 
 export interface AgentTerminatedEvent {
+  sessionId: string;
   agentId: string;
 }
 
 export interface AgentSandboxReadyEvent {
+  sessionId: string;
   agentId: string;
   sandboxId: string;
 }
 
 export interface AgentHeartbeatEvent {
+  sessionId: string;
   agentId: string;
   timestamp: string;
 }
 
 export interface AgentPausedEvent {
+  sessionId: string;
   agentId: string;
   sandboxId: string;
 }
 
 export interface AgentSandboxExpiredEvent {
+  sessionId: string;
   agentId: string;
 }
 
@@ -241,6 +251,7 @@ export interface ReplayManifest {
 }
 
 export interface ReplayCompleteEvent {
+  sessionId: string;
   agentId: string;
   manifestUrl: string;
   frameCount: number;

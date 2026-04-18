@@ -435,6 +435,7 @@ async def main():
             agent_type = task_data.get("agent_type", "orchestrator")
             whiteboard_content = task_data.get("whiteboard", "")
 
+            print("🔥 EXECUTION TRIGGERED")
             await emit(
                 "agent:thinking",
                 {"action": "Starting task", "detail": task_description},
