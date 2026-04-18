@@ -381,21 +381,28 @@ async def main():
     reconnect_sandbox_id = os.environ.get("SANDBOX_ID")
     try:
         if reconnect_sandbox_id:
-            logger.info("Reconnecting to sandbox %s", reconnect_sandbox_id)
-            desktop = Sandbox(sandbox_id=reconnect_sandbox_id, timeout=3600)
-            desktop.stream.start()
-            stream_url = desktop.stream.get_url()
-            await emit("agent:stream_ready", {"streamUrl": stream_url})
-            logger.info("Reconnected to sandbox %s, stream at %s", reconnect_sandbox_id, stream_url)
-        else:
+            try:
+                print(f"🔄 Attempting to reconnect to sandbox {reconnect_sandbox_id}...", flush=True)
+                desktop = Sandbox(sandbox_id=reconnect_sandbox_id, timeout=3600)
+                desktop.stream.start()
+                stream_url = desktop.stream.get_url()
+                await emit("agent:stream_ready", {"streamUrl": stream_url})
+                print(f"✅ Reconnected to sandbox {reconnect_sandbox_id}", flush=True)
+            except Exception as e:
+                print(f"⚠️ Reconnection failed (sandbox probably expired): {e}. Spawning new sandbox...", flush=True)
+                desktop = None # Fall through to creation logic
+        
+        if not desktop:
+            print("🚀 Spawning new E2B sandbox...", flush=True)
             desktop = Sandbox.create(timeout=3600)
             desktop.stream.start()
             stream_url = desktop.stream.get_url()
             await emit("agent:sandbox_ready", {"sandboxId": desktop.sandbox_id})
             await emit("agent:stream_ready", {"streamUrl": stream_url})
-            logger.info("Sandbox booted (id=%s), stream at %s", desktop.sandbox_id, stream_url)
+            print(f"✅ Sandbox booted: {desktop.sandbox_id}", flush=True)
+            
     except Exception as e:
-        logger.error("Failed to boot/reconnect sandbox: %s", e)
+        print(f"❌ CRITICAL ERROR: Failed to boot/reconnect sandbox: {e}", flush=True)
         if reconnect_sandbox_id:
             await emit("agent:sandbox_expired", {})
         else:
