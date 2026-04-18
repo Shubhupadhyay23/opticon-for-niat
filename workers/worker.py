@@ -16,25 +16,9 @@ sys.path.insert(0, os.path.dirname(__file__))
 import e2b_tools
 from memory import MemoryManager
 from replay import ReplayBuffer
+from agents import AGENT_PROFILES
 
 logger = logging.getLogger(__name__)
-
-SYSTEM_PROMPT = (
-    "You are an AI agent controlling a Linux desktop. "
-    "You will be shown a screenshot of the current screen before each turn. "
-    "Look at the screenshot carefully, then use one of the available tools "
-    "(click, double_click, type_text, press_key, move_mouse, scroll) to interact with the desktop. "
-    "You can only use ONE tool per turn. After your action, you'll receive a new screenshot.\n\n"
-    "IMPORTANT RULES:\n"
-    "- If you see a blank desktop, start by opening a web browser (double-click the browser icon, "
-    "or right-click the desktop and open a terminal, then run 'firefox' or 'chromium').\n"
-    "- You MUST take real actions to accomplish the task. Do NOT call 'done' until you have "
-    "actually performed meaningful actions and can see evidence of completion on screen.\n"
-    "- Break complex tasks into steps: open the right application, navigate to the right place, "
-    "perform the action, and verify the result.\n"
-    "- When the task is genuinely complete and you can confirm it from the screenshot, "
-    "call the 'done' tool with a detailed summary of what you accomplished."
-)
 
 MODEL = "anthropic/claude-sonnet-4-5-20250929"
 MAX_STEPS = 500
@@ -138,7 +122,7 @@ def trim_message_history(messages):
     ] + recent_part
 
 
-async def run_agent_loop(client, task_description, whiteboard_content="", user_memories="", on_step=None, replay_buffer=None, terminated=None, on_screenshot=None, on_checkpoint=None):
+async def run_agent_loop(client, task_description, whiteboard_content="", user_memories="", on_step=None, replay_buffer=None, terminated=None, on_screenshot=None, on_checkpoint=None, agent_type="orchestrator"):
     """
     Observe-think-act loop using Dedalus chat.completions.create().
 
@@ -150,7 +134,8 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
     Returns the final summary when the model calls 'done'.
     If `terminated` (asyncio.Event) is set, exits early.
     """
-    system_content = SYSTEM_PROMPT
+    profile = AGENT_PROFILES.get(agent_type, AGENT_PROFILES["orchestrator"])
+    system_content = profile["prompt"]
     if whiteboard_content:
         system_content += (
             f"\n\nShared whiteboard (written by other agents):\n{whiteboard_content}"
@@ -194,11 +179,12 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
         if on_screenshot is not None:
             await on_screenshot(raw_png)
 
-        # Exclude the 'done' tool for the first few steps to prevent premature completion
+        # Filter allowed tools for this sub-agent and exclude 'done' early on
+        allowed_tool_names = set(profile["tools"])
         if step < MIN_STEPS_BEFORE_DONE:
-            tools = [t for t in e2b_tools.TOOL_SCHEMAS if t["function"]["name"] != "done"]
-        else:
-            tools = e2b_tools.TOOL_SCHEMAS
+            allowed_tool_names.discard("done")
+            
+        tools = [t for t in e2b_tools.TOOL_SCHEMAS if t["function"]["name"] in allowed_tool_names]
 
         response = await call_with_retry(
             client,
@@ -270,6 +256,11 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
         last_action_label = f"Tool: {name}"
 
         result = e2b_tools.execute_tool(name, args)
+
+        # Self-Correction Interceptor
+        if isinstance(result, str) and result.startswith("ERROR:"):
+            logger.warning(f"Self-correction triggered: Tool {name} returned an error.")
+            result += "\n\n[SYSTEM SELF-CORRECTION]: Your previous action failed. Do not blindly repeat it. Reassess the situation, try a different approach, or use the 'replan_strategy' or 'escalate_to_reviewer' tools."
 
         # If done, return the summary
         if name == "done":
@@ -434,6 +425,7 @@ async def main():
 
             task_id = task_data["taskId"]
             task_description = task_data["description"]
+            agent_type = task_data.get("agent_type", "orchestrator")
             whiteboard_content = task_data.get("whiteboard", "")
 
             await emit(
@@ -506,6 +498,7 @@ async def main():
                     terminated=terminated,
                     on_screenshot=on_screenshot,
                     on_checkpoint=on_checkpoint if is_slack_session else None,
+                    agent_type=agent_type,
                 )
             except (ConnectionError, TimeoutError, OSError) as e:
                 # E2B sandbox expired or connection lost

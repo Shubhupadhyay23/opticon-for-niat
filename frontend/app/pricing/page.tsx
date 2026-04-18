@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { useBilling } from "@flowglad/nextjs";
+import { useBilling } from "@/lib/use-billing";
 import { Button } from "@/components/ui/button";
 import { Check, X, ArrowLeft } from "lucide-react";
 import { PLAN_LIMITS, PRO_FEATURE_SLUG } from "@/lib/billing-constants";

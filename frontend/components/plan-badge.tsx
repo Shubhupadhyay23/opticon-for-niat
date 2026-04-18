@@ -1,6 +1,6 @@
 "use client";
 
-import { useBilling } from "@flowglad/nextjs";
+import { useBilling } from "@/lib/use-billing";
 import { PRO_FEATURE_SLUG } from "@/lib/billing-constants";
 
 export function PlanBadge() {

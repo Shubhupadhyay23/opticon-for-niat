@@ -12,10 +12,17 @@ import {
 } from "@/lib/db/session-persist";
 import { decomposeTasks, type DecomposedTask } from "@/lib/orchestrator";
 
+const isDemoMode = !process.env.DATABASE_URL || process.env.DATABASE_URL.includes("placeholder");
+
 export async function POST(request: Request) {
-  const authSession = await auth();
-  if (!authSession?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  let userId = "demo-user";
+
+  if (!isDemoMode) {
+    const authSession = await auth();
+    if (!authSession?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    userId = authSession.user.id;
   }
 
   const body = await request.json();
@@ -40,29 +47,33 @@ export async function POST(request: Request) {
     );
   }
 
-  const maxAgents = await getMaxAgentsForUser(authSession.user.id);
-  if (agentCount > maxAgents) {
-    return NextResponse.json(
-      {
-        error: `Your plan allows up to ${maxAgents} agents.`,
-        code: "PLAN_LIMIT_EXCEEDED",
-        maxAgents,
-      },
-      { status: 403 },
-    );
+  if (!isDemoMode) {
+    const maxAgents = await getMaxAgentsForUser(userId);
+    if (agentCount > maxAgents) {
+      return NextResponse.json(
+        {
+          error: `Your plan allows up to ${maxAgents} agents.`,
+          code: "PLAN_LIMIT_EXCEEDED",
+          maxAgents,
+        },
+        { status: 403 },
+      );
+    }
   }
 
   const sessionId = uuidv4();
-  createSession(sessionId, prompt.trim(), agentCount, authSession.user.id);
+  createSession(sessionId, prompt.trim(), agentCount, userId);
 
-  // Persist session to database
-  persistSession(
-    sessionId,
-    authSession.user.id,
-    prompt.trim(),
-    agentCount,
-    "decomposing"
-  ).catch(console.error);
+  // Persist session to database (skip in demo mode)
+  if (!isDemoMode) {
+    persistSession(
+      sessionId,
+      userId,
+      prompt.trim(),
+      agentCount,
+      "decomposing"
+    ).catch(console.error);
+  }
 
   // Decompose prompt into TODOs via Dedalus
   let todoDescriptions: DecomposedTask[];
@@ -82,14 +93,18 @@ export async function POST(request: Request) {
   const todos = addTodos(sessionId, todoDescriptions);
 
   // Persist todos to database
-  persistTodos(sessionId, todos).catch(console.error);
+  if (!isDemoMode) {
+    persistTodos(sessionId, todos).catch(console.error);
+  }
 
   // Set session to pending_approval so the user can review tasks
   const opticonSession = getSession(sessionId);
   if (opticonSession) {
     opticonSession.status = "pending_approval";
     // Persist status update
-    persistSessionStatus(sessionId, "pending_approval").catch(console.error);
+    if (!isDemoMode) {
+      persistSessionStatus(sessionId, "pending_approval").catch(console.error);
+    }
   }
 
   return NextResponse.json({ sessionId, tasks: todos }, { status: 201 });

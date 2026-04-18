@@ -97,6 +97,24 @@ def scroll(x: int, y: int, direction: str = "down", amount: int = 3) -> str:
     return f"Scrolled {direction} by {amount} at ({x}, {y})"
 
 
+# --- Outward integrations & System Tools ---
+
+def send_slack_message(channel: str, message: str, **_kwargs) -> str:
+    """Mock integration: send a message to a Slack channel."""
+    return f"Successfully sent Slack message to {channel}: {message}"
+
+def store_to_memory_db(key_insight: str, **_kwargs) -> str:
+    """Store key findings to persistent memory/database."""
+    return f"Key insight stored in database natively: {key_insight}"
+
+def escalate_to_reviewer(reason: str, **_kwargs) -> str:
+    """Pass control to Reviewer agent if confidence is low."""
+    return f"Escalated to Reviewer Agent due to: {reason}"
+
+def replan_strategy(new_plan: str, **_kwargs) -> str:
+    """Explicitly reset instructions and set a new task plan."""
+    return f"Replanned execution strategy: {new_plan}"
+
 # --- Dispatch map: name -> function ---
 
 TOOL_FUNCTIONS = {
@@ -106,6 +124,10 @@ TOOL_FUNCTIONS = {
     "press_key": press_key,
     "move_mouse": move_mouse,
     "scroll": scroll,
+    "send_slack_message": send_slack_message,
+    "store_to_memory_db": store_to_memory_db,
+    "escalate_to_reviewer": escalate_to_reviewer,
+    "replan_strategy": replan_strategy,
 }
 
 # --- OpenAI-compatible tool schemas for chat.completions.create() ---
@@ -218,13 +240,78 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "done",
-            "description": "Call this when the task is complete. Provide a summary of what you accomplished.",
+            "description": "Call this when the task is complete. Provide a structured output of your results.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "summary": {"type": "string", "description": "Summary of what was accomplished"},
+                    "root_cause": {"type": "string", "description": "What was the core problem?"},
+                    "fix": {"type": "string", "description": "What changes did you apply to resolve it?"},
+                    "confidence": {"type": "string", "description": "Your numerical confidence score (e.g. '87%')"},
+                    "action": {"type": "string", "description": "The final outcome action (e.g. 'PR created', 'Logs analyzed')"},
+                    "steps_taken": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of distinct steps you took"
+                    },
                 },
-                "required": ["summary"],
+                "required": ["root_cause", "fix", "confidence", "action", "steps_taken"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_slack_message",
+            "description": "Send a message to a Slack channel.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "channel": {"type": "string", "description": "Slack channel name (e.g. #general)"},
+                    "message": {"type": "string", "description": "Message content"},
+                },
+                "required": ["channel", "message"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "store_to_memory_db",
+            "description": "Store an important key insight from your task into the memory database.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "key_insight": {"type": "string", "description": "The insight or summary to memorize"},
+                },
+                "required": ["key_insight"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "escalate_to_reviewer",
+            "description": "If your confidence is low or you cannot fix the bug, escalate the task to the Reviewer Agent.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {"type": "string", "description": "Reason for escalating to the reviewer"},
+                },
+                "required": ["reason"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "replan_strategy",
+            "description": "If you are stuck and need to restart your approach, outline your new step-by-step strategy here.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "new_plan": {"type": "string", "description": "Your revised step-by-step plan"},
+                },
+                "required": ["new_plan"],
             },
         },
     },
@@ -237,6 +324,15 @@ def execute_tool(name, arguments):
     Errors are returned as strings so the model can self-correct rather than crashing.
     """
     if name == "done":
+        if "root_cause" in arguments:
+            steps_joined = ", ".join(arguments.get("steps_taken", []))
+            return (
+                f"Root Cause: {arguments.get('root_cause')}\n"
+                f"Fix: {arguments.get('fix')}\n"
+                f"Confidence: {arguments.get('confidence')}\n"
+                f"Action: {arguments.get('action')}\n"
+                f"Steps Taken: {steps_joined}"
+            )
         return arguments.get("summary", "Task complete")
     func = TOOL_FUNCTIONS.get(name)
     if not func:

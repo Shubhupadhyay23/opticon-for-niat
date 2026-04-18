@@ -5,7 +5,14 @@ import { getLatestThumbnail } from "@/lib/session-store";
 
 export const dynamic = "force-dynamic";
 
+const isDemoMode = !process.env.DATABASE_URL || process.env.DATABASE_URL.includes("placeholder");
+
 export async function GET() {
+  // In demo mode, return empty sessions since there's no DB
+  if (isDemoMode) {
+    return NextResponse.json({ sessions: [] });
+  }
+
   const authSession = await auth();
   if (!authSession?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

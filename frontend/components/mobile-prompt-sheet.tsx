@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useBilling } from "@flowglad/nextjs";
+import { useBilling } from "@/lib/use-billing";
 import {
   Sheet,
   SheetContent,

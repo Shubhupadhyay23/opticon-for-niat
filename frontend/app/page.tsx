@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
-import { useBilling } from "@flowglad/nextjs";
+import { useBilling } from "@/lib/use-billing";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, LogOut, Lock } from "lucide-react";
