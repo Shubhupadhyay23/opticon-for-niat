@@ -24,8 +24,8 @@ export async function persistSession(
       createdAt: new Date(),
       isPanopticon: isPanopticon ? "true" : "false",
     });
-  } catch (err) {
-    console.error("DB Error (persistSession):", err);
+    } catch (err) {
+    if (process.env.DEBUG_DB === "true") console.error("DB Error (persistSession):", err);
   }
 }
 
@@ -47,8 +47,8 @@ export async function persistTodos(sessionId: string, todoList: Todo[]) {
         lane: todo.lane ?? null,
       }))
     );
-  } catch (err) {
-    console.error("DB Error (persistTodos):", err);
+    } catch (err) {
+    if (process.env.DEBUG_DB === "true") console.error("DB Error (persistTodos):", err);
   }
 }
 
@@ -119,8 +119,8 @@ export async function persistTodoStatus(
         ...(result && { result }),
       })
       .where(eq(todos.id, todoId));
-  } catch (err) {
-    console.error("DB Error (persistTodoStatus):", err);
+    } catch (err) {
+    if (process.env.DEBUG_DB === "true") console.error("DB Error (persistTodoStatus):", err);
   }
 }
 
@@ -140,8 +140,8 @@ export async function persistAgent(agent: Agent) {
       tasksTotal: agent.tasksTotal || 0,
       createdAt: new Date(),
     });
-  } catch (err) {
-    console.error("DB Error (persistAgent):", err);
+    } catch (err) {
+    if (process.env.DEBUG_DB === "true") console.error("DB Error (persistAgent):", err);
   }
 }
 
@@ -178,8 +178,8 @@ export async function persistAgentHeartbeat(agentId: string) {
       .update(agents)
       .set({ lastHeartbeat: new Date() })
       .where(eq(agents.id, agentId));
-  } catch (err) {
-    console.error("DB Error (persistAgentHeartbeat):", err);
+    } catch (err) {
+    if (process.env.DEBUG_DB === "true") console.error("DB Error (persistAgentHeartbeat):", err);
   }
 }
 

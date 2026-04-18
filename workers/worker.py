@@ -38,8 +38,8 @@ def make_screenshot_message():
 
     # Compress PNG to JPEG for smaller API payloads (~500KB-1MB vs 2-8MB)
     img = Image.open(BytesIO(raw_bytes))
-    jpeg_buf = BytesIO()
-    img.save(jpeg_buf, format="JPEG", quality=75)
+    # Reduce quality for smoother UI streaming (60 is the sweet spot for speed vs clarity)
+    img.save(jpeg_buf, format="JPEG", quality=60)
     jpeg_b64 = base64.b64encode(jpeg_buf.getvalue()).decode("utf-8")
 
     msg = {
@@ -556,7 +556,7 @@ async def main():
                 return "continue"
 
             # Execute the loop
-            print("🚀 Calling run_agent_loop...", flush=True)
+            print(f"🚀 Execution started: {task_id[:8]}", flush=True)
             try:
                 result = await run_agent_loop(
                     client, task_description,
@@ -582,10 +582,9 @@ async def main():
                     {"error": str(e)},
                 )
                 logger.error("Task %s failed: %s", task_id, e)
-            print("✅ run_agent_loop finished", flush=True)
 
             # Report task completion
-            print("📤 Completing task in store...", flush=True)
+            print(f"✅ Task finished: {task_id[:8]}", flush=True)
             await emit(
                 "task:completed", {"todoId": task_id, "result": result}
             )
