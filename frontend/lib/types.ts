@@ -187,6 +187,7 @@ export interface ServerToClientEvents {
   "task:none": () => void;
   "session:stop": (payload: { sessionId: string }) => void;
   "session:checkpoint_resume": (payload: { sessionId: string }) => void;
+  "agent:checkpoint": (payload: AgentCheckpointEvent) => void;
 }
 
 export interface ClientToServerEvents {
