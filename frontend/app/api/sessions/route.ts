@@ -81,12 +81,12 @@ export async function POST(request: Request) {
   try {
     todoDescriptions = await decomposeTasks(prompt.trim(), agentCount);
   } catch (error: any) {
-    console.error("[orchestrator] Failed to decompose prompt:", error);
+    console.error("[orchestrator] Critical error in decomposition:", error);
     const errorMsg = error instanceof Error ? error.message : String(error);
     const failedSession = getSession(sessionId);
     if (failedSession) failedSession.status = "failed";
     return NextResponse.json(
-      { error: `Decomposition failed: ${errorMsg}` },
+      { error: `Planner failed. Using fallback execution... (Internal error: ${errorMsg})` },
       { status: 500 },
     );
   }

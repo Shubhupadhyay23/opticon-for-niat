@@ -45,84 +45,100 @@ function extractJSON(text: string): string {
 }
 
 /**
- * Decompose a prompt into granular, step-by-step tasks grouped into parallel
- * lanes using Claude Sonnet via the Dedalus Labs API.
+ * Internal helper to call Dedalus with a timeout and specific prompt.
+ */
+async function callPlanner(
+  prompt: string,
+  systemInstruction: string,
+  userInstruction: string,
+  timeoutMs: number = 15000
+): Promise<string> {
+  const llmCall = client.chat.completions.create({
+    model: "anthropic/claude-sonnet-4-5-20250929",
+    max_tokens: 4096,
+    messages: [
+      { role: "system", content: systemInstruction },
+      { role: "user", content: `${userInstruction}\n\nTask: ${prompt.trim()}` },
+    ],
+  });
+
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error("Planner timed out")), timeoutMs)
+  );
+
+  const response = await Promise.race([llmCall, timeout]);
+  return response.choices[0].message.content || "";
+}
+
+/**
+ * Decompose a prompt into granular tasks using a fault-tolerant multi-stage pipeline.
  */
 export async function decomposeTasks(
   prompt: string,
   taskCount?: number,
   maxTasks: number = 10,
-  maxLanes: number = 4,
+  maxLanes: number = 4
 ): Promise<DecomposedTask[]> {
-  const countInstruction = taskCount
-    ? `exactly ${taskCount}`
-    : `as many as needed (minimum 1, maximum ${maxTasks})`;
+  const countDesc = taskCount ? `exactly ${taskCount}` : `up to ${maxTasks}`;
 
+  const standardSystem = `You are a JSON API that decomposes user requests into executable steps. You respond with raw JSON only, never natural language. Return ONLY valid JSON. No explanations.`;
+
+  const standardUser = `Decompose the following task into ${countDesc} granular, executable steps grouped into parallel lanes. 
+STRICT JSON FORMAT:
+{
+  "tasks": [
+    { "description": string, "lane": number }
+  ]
+}`;
+
+  const retryUser = `Break this into simple, granular steps:`;
+
+  // STAGE 1: Primary Attempt
   try {
-    console.log("[orchestrator:planner] Sending prompt to Dedalus...");
-    const response = await client.chat.completions.create({
-      model: "anthropic/claude-sonnet-4-5-20250929",
-      max_tokens: 4096,
-      messages: [
-        {
-          role: "system",
-          content: `You are a JSON API that breaks user requests into small, simple, granular tasks grouped into parallel lanes. You respond with raw JSON only, never natural language.
-
-Each lane is assigned to one AI agent on its own cloud desktop with a browser and terminal. Tasks within a lane run sequentially. Different lanes run in parallel.
-
-Deciding lanes:
-- Use same lane for tasks that share state or depend on each other.
-- Use separate lanes only for independent work.
-- Maximum ${maxLanes} lanes.
-
-Bias toward simplicity and granularity. Each task should be ONE simple action.
-End each task by describing how the agent knows it's done.`,
-        },
-        {
-          role: "user",
-          content: `Break the following request into ${countInstruction} small, granular tasks grouped into lanes. Each task should be a simple, concrete action. 
-
-Request: ${prompt.trim()}
-
-Return a JSON object with a "todos" array where each item has:
-- "description": the task instruction
-- "lane": integer lane number (starting from 0)`,
-        },
-      ],
-    });
-
-    const text = response.choices[0].message.content || "";
-    console.log("[orchestrator:parser] Raw response received.");
-
-    try {
-      const json = extractJSON(text);
-      const parsed = JSON.parse(json);
-
-      if (!parsed.todos || !Array.isArray(parsed.todos)) {
-        throw new Error("Missing 'todos' array in parsed JSON");
-      }
-
-      const tasks: DecomposedTask[] = parsed.todos
-        .slice(0, maxTasks)
-        .map((t: any) => ({
-          description: String(t.description || t.task || "Process task"),
-          lane: Math.min(Number(t.lane ?? 0), maxLanes - 1),
-        }));
-
-      if (tasks.length === 0) throw new Error("Parsed 'todos' array is empty");
-
-      console.log(`[orchestrator:parser] Successfully parsed ${tasks.length} tasks.`);
-      return tasks;
-    } catch (parseError) {
-      console.error("[orchestrator:parser] Failed to parse LLM response:", parseError);
-      throw parseError; // Caught by outer block
-    }
+    console.log("[orchestrator:planner] Attempting primary decomposition...");
+    const text = await callPlanner(prompt, standardSystem, standardUser);
+    return parseResult(text, maxTasks, maxLanes);
   } catch (error) {
-    console.warn("[orchestrator:failover] Decomposition failed. Using fallback single-task mode.", error);
-    // FALLBACK: Return the original prompt as a single task in lane 0
-    return [{
-      description: prompt.trim(),
-      lane: 0
-    }];
+    console.warn("[orchestrator:retry] Primary attempt failed. Retrying with simplified prompt...", error instanceof Error ? error.message : error);
+
+    // STAGE 2: Simplified Retry
+    try {
+      const text = await callPlanner(prompt, standardSystem, retryUser);
+      return parseResult(text, maxTasks, maxLanes);
+    } catch (retryError) {
+      console.error("[orchestrator:failover] Both attempts failed. Using fallback mode.", retryError instanceof Error ? retryError.message : retryError);
+
+      // STAGE 3: Final Fallback (Mandatory)
+      return [{
+        description: prompt.trim(),
+        lane: 0,
+      }];
+    }
   }
+}
+
+/**
+ * Parser that handles various schema shapes and validates content.
+ */
+function parseResult(text: string, maxTasks: number, maxLanes: number): DecomposedTask[] {
+  console.log("[orchestrator:parser] Processing LLM response...");
+  const json = extractJSON(text);
+  const parsed = JSON.parse(json);
+
+  // Schema Validation (Step 4): Handle both "tasks" and "todos" keys
+  const rawTasks = parsed.tasks || parsed.todos;
+
+  if (!rawTasks || !Array.isArray(rawTasks) || rawTasks.length === 0) {
+    throw new Error("No valid task list found in JSON response");
+  }
+
+  const tasks: DecomposedTask[] = rawTasks
+    .slice(0, maxTasks)
+    .map((t: any) => ({
+      description: String(t.description || t.task || t.command || "Execute task"),
+      lane: Math.min(Number(t.lane ?? 0), maxLanes - 1),
+    }));
+
+  console.log(`[orchestrator:parser] Successfully parsed ${tasks.length} tasks.`);
+  return tasks;
 }
