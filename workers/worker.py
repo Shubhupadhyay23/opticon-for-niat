@@ -193,14 +193,32 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
             
         tools = [t for t in e2b_tools.TOOL_SCHEMAS if t["function"]["name"] in allowed_tool_names]
 
-        response = await call_with_retry(
-            client,
-            model=MODEL,
-            messages=messages,
-            tools=tools,
-            tool_choice={"type": "any"},
-            max_tokens=2048,
-        )
+        # Emit "Thinking" state immediately to provide UI feedback
+        if on_step:
+            await on_step(step + 1, "thinking", {}, "Analyzing current screen...")
+
+        try:
+            print("🧠 Calling LLM...")
+            response = await asyncio.wait_for(
+                call_with_retry(
+                    client,
+                    model=MODEL,
+                    messages=messages,
+                    tools=tools,
+                    tool_choice={"type": "any"},
+                    max_tokens=2048,
+                ),
+                timeout=45.0  # Hard timeout for LLM reasoning
+            )
+            print("✅ LLM responded")
+        except asyncio.TimeoutError:
+            print("❌ LLM TIMEOUT after 45s")
+            if on_step:
+                await on_step(step + 1, "error", {"error": "LLM timeout"}, "Thinking took too long, retrying...")
+            continue
+        except Exception as e:
+            print(f"❌ LLM ERROR: {e}")
+            raise
 
         choice = response.choices[0]
         msg = choice.message
@@ -234,6 +252,7 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
                 reasoning = combined or None
 
         if not msg.tool_calls:
+            print("❌ No tool call from LLM")
             no_tool_retries += 1
             if no_tool_retries >= 3:
                 logger.error("Model returned no tool calls %d times, giving up", no_tool_retries)
@@ -298,9 +317,6 @@ async def main():
     async def emit(event, data):
         await sio.emit(event, {"sessionId": session_id, "agentId": agent_id, **data})
 
-    # Join session room
-    await emit("agent:join", {})
-
     # --- Register event handlers BEFORE booting sandbox ---
     task_queue = asyncio.Queue()
     terminated = asyncio.Event()
@@ -331,6 +347,9 @@ async def main():
     @sio.on("session:checkpoint_resume")
     async def on_checkpoint_resume(data=None):
         checkpoint_resume.set()
+
+    # Join session room (Handlers registered first to prevent race conditions)
+    await emit("agent:join", {})
 
     # --- Boot or reconnect E2B sandbox ---
     desktop = None
@@ -438,6 +457,9 @@ async def main():
             whiteboard_content = task_data.get("whiteboard", "")
 
             print("🔥 EXECUTION TRIGGERED")
+            # Immediate feedback that worker is starting
+            await emit("agent:thinking", {"action": "Agent started execution", "detail": task_description})
+            
             await emit(
                 "agent:thinking",
                 {"action": "Starting task", "detail": task_description},
