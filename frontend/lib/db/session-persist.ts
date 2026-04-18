@@ -14,15 +14,19 @@ export async function persistSession(
   status: string,
   isPanopticon: boolean = false
 ) {
-  await db.insert(sessions).values({
-    id,
-    userId,
-    prompt,
-    agentCount,
-    status,
-    createdAt: new Date(),
-    isPanopticon: isPanopticon ? "true" : "false",
-  });
+  try {
+    await db.insert(sessions).values({
+      id,
+      userId,
+      prompt,
+      agentCount,
+      status,
+      createdAt: new Date(),
+      isPanopticon: isPanopticon ? "true" : "false",
+    });
+  } catch (err) {
+    console.error("DB Error (persistSession):", err);
+  }
 }
 
 /**
@@ -31,28 +35,7 @@ export async function persistSession(
 export async function persistTodos(sessionId: string, todoList: Todo[]) {
   if (todoList.length === 0) return;
 
-  await db.insert(todos).values(
-    todoList.map((todo) => ({
-      id: todo.id,
-      sessionId,
-      description: todo.description,
-      status: todo.status,
-      assignedTo: todo.assignedTo || null,
-      result: todo.result || null,
-      lane: todo.lane ?? null,
-    }))
-  );
-}
-
-/**
- * Replace todos for a session (used when user edits tasks before approval)
- * Deletes all existing todos and inserts new ones in a transaction
- */
-export async function replaceTodos(sessionId: string, todoList: Todo[]) {
-  // neon-http doesn't support transactions — run as sequential queries
-  await db.delete(todos).where(eq(todos.sessionId, sessionId));
-
-  if (todoList.length > 0) {
+  try {
     await db.insert(todos).values(
       todoList.map((todo) => ({
         id: todo.id,
@@ -64,6 +47,35 @@ export async function replaceTodos(sessionId: string, todoList: Todo[]) {
         lane: todo.lane ?? null,
       }))
     );
+  } catch (err) {
+    console.error("DB Error (persistTodos):", err);
+  }
+}
+
+/**
+ * Replace todos for a session (used when user edits tasks before approval)
+ * Deletes all existing todos and inserts new ones in a transaction
+ */
+export async function replaceTodos(sessionId: string, todoList: Todo[]) {
+  try {
+    // neon-http doesn't support transactions — run as sequential queries
+    await db.delete(todos).where(eq(todos.sessionId, sessionId));
+
+    if (todoList.length > 0) {
+      await db.insert(todos).values(
+        todoList.map((todo) => ({
+          id: todo.id,
+          sessionId,
+          description: todo.description,
+          status: todo.status,
+          assignedTo: todo.assignedTo || null,
+          result: todo.result || null,
+          lane: todo.lane ?? null,
+        }))
+      );
+    }
+  } catch (err) {
+    console.error("DB Error (replaceTodos):", err);
   }
 }
 
@@ -99,30 +111,38 @@ export async function persistTodoStatus(
   status: string,
   result?: string
 ) {
-  await db
-    .update(todos)
-    .set({
-      status,
-      ...(result && { result }),
-    })
-    .where(eq(todos.id, todoId));
+  try {
+    await db
+      .update(todos)
+      .set({
+        status,
+        ...(result && { result }),
+      })
+      .where(eq(todos.id, todoId));
+  } catch (err) {
+    console.error("DB Error (persistTodoStatus):", err);
+  }
 }
 
 // --- Agent persistence helpers ---
 
 export async function persistAgent(agent: Agent) {
-  await db.insert(agents).values({
-    id: agent.id,
-    sessionId: agent.sessionId,
-    name: agent.name,
-    status: agent.status,
-    sandboxId: agent.sandboxId || null,
-    streamUrl: agent.streamUrl || null,
-    currentTaskId: agent.currentTaskId,
-    tasksCompleted: agent.tasksCompleted || 0,
-    tasksTotal: agent.tasksTotal || 0,
-    createdAt: new Date(),
-  });
+  try {
+    await db.insert(agents).values({
+      id: agent.id,
+      sessionId: agent.sessionId,
+      name: agent.name,
+      status: agent.status,
+      sandboxId: agent.sandboxId || null,
+      streamUrl: agent.streamUrl || null,
+      currentTaskId: agent.currentTaskId,
+      tasksCompleted: agent.tasksCompleted || 0,
+      tasksTotal: agent.tasksTotal || 0,
+      createdAt: new Date(),
+    });
+  } catch (err) {
+    console.error("DB Error (persistAgent):", err);
+  }
 }
 
 export async function persistAgentStatus(agentId: string, status: string) {
@@ -153,10 +173,14 @@ export async function persistAgentStreamUrl(
 }
 
 export async function persistAgentHeartbeat(agentId: string) {
-  await db
-    .update(agents)
-    .set({ lastHeartbeat: new Date() })
-    .where(eq(agents.id, agentId));
+  try {
+    await db
+      .update(agents)
+      .set({ lastHeartbeat: new Date() })
+      .where(eq(agents.id, agentId));
+  } catch (err) {
+    console.error("DB Error (persistAgentHeartbeat):", err);
+  }
 }
 
 export async function getSessionAgents(sessionId: string) {
