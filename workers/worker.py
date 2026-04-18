@@ -61,9 +61,9 @@ async def call_with_retry(client, **kwargs):
     """Call client.chat.completions.create() with exponential backoff on failure."""
     for attempt in range(MAX_RETRIES):
         try:
-            logger.info("  (attempt %d/%d) Calling LLM...", attempt + 1, MAX_RETRIES)
+            print(f"  (attempt {attempt + 1}/{MAX_RETRIES}) Calling LLM: {kwargs.get('model')}...", flush=True)
             response = await asyncio.wait_for(client.chat.completions.create(**kwargs), timeout=60.0)
-            logger.info("✅ LLM response received")
+            print("✅ LLM response received", flush=True)
             return response
         except asyncio.TimeoutError:
             logger.error("LLM call timed out after 60s")
@@ -162,8 +162,10 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
     for step in range(MAX_STEPS):
         # Check for termination between steps
         if terminated is not None and terminated.is_set():
-            logger.info("Terminated during task at step %d", step)
+            print(f"Terminated during task at step {step}", flush=True)
             return "(terminated by user)"
+
+        print(f"🚀 ENTERED AGENT LOOP TURN {step + 1}", flush=True)
 
         # Checkpoint: pause every CHECKPOINT_INTERVAL steps for Slack check-in
         if on_checkpoint and step > 0 and step % CHECKPOINT_INTERVAL == 0:
@@ -198,7 +200,7 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
             await on_step(step + 1, "thinking", {}, "Analyzing current screen...")
 
         try:
-            print("🧠 Calling LLM...")
+            print("🧠 BEFORE LLM...", flush=True)
             response = await asyncio.wait_for(
                 call_with_retry(
                     client,
@@ -210,9 +212,9 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
                 ),
                 timeout=45.0  # Hard timeout for LLM reasoning
             )
-            print("✅ LLM responded")
+            print("✅ AFTER LLM", flush=True)
         except asyncio.TimeoutError:
-            print("❌ LLM TIMEOUT after 45s")
+            print("❌ LLM TIMEOUT after 45s", flush=True)
             if on_step:
                 await on_step(step + 1, "error", {"error": "LLM timeout"}, "Thinking took too long, retrying...")
             continue
@@ -252,7 +254,7 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
                 reasoning = combined or None
 
         if not msg.tool_calls:
-            print("❌ No tool call from LLM")
+            print("❌ No tool call from LLM", flush=True)
             no_tool_retries += 1
             if no_tool_retries >= 3:
                 logger.error("Model returned no tool calls %d times, giving up", no_tool_retries)
@@ -324,7 +326,7 @@ async def main():
 
     @sio.on("task:assign")
     async def on_task_assign(data):
-        print("📥 TASK RECEIVED:", data.get("taskId", "unknown"))
+        print("📥 TASK RECEIVED:", data.get("taskId", "unknown"), flush=True)
         await task_queue.put(data)
 
     @sio.on("task:none")
@@ -382,7 +384,10 @@ async def main():
     e2b_tools.init(desktop)
 
     # --- Init Daedalus client ---
-    client = AsyncDedalus()
+    dedalus_api_key = os.environ.get("DEDALUS_API_KEY")
+    if not dedalus_api_key:
+        print("❌ CRITICAL ERROR: DEDALUS_API_KEY is not set in environment!", flush=True)
+    client = AsyncDedalus(api_key=dedalus_api_key)
 
     # --- Replay buffer ---
     replay_buffer = ReplayBuffer()
@@ -448,7 +453,7 @@ async def main():
             except asyncio.TimeoutError:
                 if terminated.is_set():
                     break
-                print("⏳ Still waiting for task...")
+                print("⏳ Waiting for task...", flush=True)
                 continue
 
             task_id = task_data["taskId"]
@@ -456,7 +461,7 @@ async def main():
             agent_type = task_data.get("agent_type", "orchestrator")
             whiteboard_content = task_data.get("whiteboard", "")
 
-            print("🔥 EXECUTION TRIGGERED")
+            print("🔥 EXECUTION TRIGGERED", flush=True)
             # Immediate feedback that worker is starting
             await emit("agent:thinking", {"action": "Agent started execution", "detail": task_description})
             
