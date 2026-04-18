@@ -20,7 +20,9 @@ from agents import AGENT_PROFILES
 
 logger = logging.getLogger(__name__)
 
-MODEL = "anthropic/claude-sonnet-4-5-20250929"
+# MODEL = "openai/gpt-4o-mini"
+MODEL = "claude-3-5-sonnet-20241022"  # Correct model name for Anthropic
+ENABLE_MOCK_LLM = os.environ.get("ENABLE_MOCK_LLM", "false").lower() == "true"
 MAX_STEPS = 500
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 2  # seconds
@@ -59,24 +61,39 @@ def make_screenshot_message():
 
 async def call_with_retry(client, **kwargs):
     """Call client.chat.completions.create() with exponential backoff on failure."""
+    
+    if ENABLE_MOCK_LLM:
+        print("⚡ [MOCK] Bypassing real LLM call...", flush=True)
+        await asyncio.sleep(1)
+        # Construct a fake response object matching Dedalus/OpenAI schema
+        from types import SimpleNamespace
+        return SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(
+                content="I will complete the task.",
+                tool_calls=[SimpleNamespace(id="mock_1", function=SimpleNamespace(name="done", arguments="{}"))]
+            ))
+        ])
+
     for attempt in range(MAX_RETRIES):
         try:
+            print(f"🧠 FULL KWARGS: {kwargs}", flush=True)
             print(f"  (attempt {attempt + 1}/{MAX_RETRIES}) Calling LLM: {kwargs.get('model')}...", flush=True)
-            response = await asyncio.wait_for(client.chat.completions.create(**kwargs), timeout=60.0)
+            
+            # Hard 20s timeout as requested for isolation
+            response = await asyncio.wait_for(client.chat.completions.create(**kwargs), timeout=20.0)
+            
             print("✅ LLM response received", flush=True)
             return response
         except asyncio.TimeoutError:
-            logger.error("LLM call timed out after 60s")
+            print(f"❌ LLM TIMEOUT after 20s (Attempt {attempt + 1})", flush=True)
             if attempt == MAX_RETRIES - 1:
                 raise
         except Exception as e:
+            print(f"💥 LLM HARD FAIL: {str(e)}", flush=True)
             if attempt == MAX_RETRIES - 1:
                 raise
             delay = RETRY_BASE_DELAY * (2 ** attempt)
-            logger.warning(
-                "API error (attempt %d/%d): %s — retrying in %ds",
-                attempt + 1, MAX_RETRIES, e, delay,
-            )
+            print(f"⚠️ Retrying in {delay}s...", flush=True)
             await asyncio.sleep(delay)
 
 
