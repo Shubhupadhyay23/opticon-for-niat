@@ -48,31 +48,4 @@ export async function GET(
   }
 
   return NextResponse.json(existing);
-
-  // Restore in-memory state
-  const restored = restoreSessionFromDb(dbSession);
-
-  // Respawn workers for agents with valid sandbox IDs
-  if (restored.status === "running" || restored.status === "paused") {
-    for (const agent of restored.agents) {
-      if (
-        agent.sandboxId &&
-        (agent.status === "paused" || agent.status === "active" || agent.status === "idle")
-      ) {
-        try {
-          respawnWorker(id, agent);
-        } catch (err) {
-          console.error(`[recover] Failed to respawn agent ${agent.id}:`, err);
-        }
-      }
-    }
-
-    // Transition from paused back to running
-    if (restored.status === "paused") {
-      restored.status = "running";
-      persistSessionStatus(id, "running").catch(console.error);
-    }
-  }
-
-  return NextResponse.json(restored);
 }
