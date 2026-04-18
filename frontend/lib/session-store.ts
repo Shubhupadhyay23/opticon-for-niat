@@ -273,7 +273,7 @@ export function restoreSessionFromDb(dbSession: {
     })),
     createdAt: dbSession.createdAt?.getTime() || Date.now(),
     whiteboard: "",
-    userId: dbSession.userId,
+    userId: dbSession.userId ?? undefined,
   };
   sessions.set(session.id, session);
   return session;
