@@ -39,6 +39,7 @@ def make_screenshot_message():
     # Compress PNG to JPEG for smaller API payloads (~500KB-1MB vs 2-8MB)
     img = Image.open(BytesIO(raw_bytes))
     # Reduce quality for smoother UI streaming (60 is the sweet spot for speed vs clarity)
+    jpeg_buf = BytesIO()
     img.save(jpeg_buf, format="JPEG", quality=60)
     jpeg_b64 = base64.b64encode(jpeg_buf.getvalue()).decode("utf-8")
 
