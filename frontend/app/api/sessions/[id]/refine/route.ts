@@ -10,9 +10,13 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authSession = await auth();
-  if (!authSession?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const isDemoMode = process.env.BYPASS_AUTH?.toLowerCase() === "true" || !process.env.DATABASE_URL || process.env.DATABASE_URL.includes("placeholder");
+  
+  if (!isDemoMode) {
+    const authSession = await auth();
+    if (!authSession?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
   }
 
   const { id: sessionId } = await params;
@@ -20,6 +24,14 @@ export async function POST(
 
   if (!session) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  }
+
+  // Skip userId check in demo mode
+  if (!isDemoMode && session.userId) {
+    const authSession = await auth();
+    if (session.userId !== authSession?.user?.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
   }
 
   if (session.status !== "pending_approval") {

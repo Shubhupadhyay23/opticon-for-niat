@@ -22,9 +22,18 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authSession = await auth();
-  if (!authSession?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const isDemoMode = process.env.BYPASS_AUTH?.toLowerCase() === "true" || !process.env.DATABASE_URL || process.env.DATABASE_URL.includes("placeholder");
+  
+  let userId = "demo-user";
+  let maxAgents = 4;
+
+  if (!isDemoMode) {
+    const authSession = await auth();
+    if (!authSession?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    userId = authSession.user.id;
+    maxAgents = await getMaxAgentsForUser(userId);
   }
 
   const { id: sessionId } = await params;
@@ -34,7 +43,7 @@ export async function POST(
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
-  if (session.userId && session.userId !== authSession.user.id) {
+  if (!isDemoMode && session.userId && session.userId !== userId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -44,8 +53,6 @@ export async function POST(
       { status: 400 }
     );
   }
-
-  const maxAgents = await getMaxAgentsForUser(authSession.user.id);
 
   const body = await request.json();
   const { tasks, agentCount } = body as {
