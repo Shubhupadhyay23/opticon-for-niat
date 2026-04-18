@@ -1,7 +1,7 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 
-const isDemoMode = !process.env.DATABASE_URL || process.env.DATABASE_URL.includes("placeholder");
+const isDemoMode = process.env.BYPASS_AUTH === "true" || !process.env.DATABASE_URL || process.env.DATABASE_URL.includes("placeholder");
 
 export default isDemoMode
   ? function demoMiddleware() {

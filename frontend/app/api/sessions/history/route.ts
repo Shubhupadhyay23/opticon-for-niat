@@ -5,7 +5,7 @@ import { getLatestThumbnail } from "@/lib/session-store";
 
 export const dynamic = "force-dynamic";
 
-const isDemoMode = !process.env.DATABASE_URL || process.env.DATABASE_URL.includes("placeholder");
+const isDemoMode = process.env.BYPASS_AUTH === "true" || !process.env.DATABASE_URL || process.env.DATABASE_URL.includes("placeholder");
 
 export async function GET() {
   // In demo mode, return empty sessions since there's no DB

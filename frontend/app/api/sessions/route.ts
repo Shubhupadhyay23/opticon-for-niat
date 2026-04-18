@@ -12,7 +12,7 @@ import {
 } from "@/lib/db/session-persist";
 import { decomposeTasks, type DecomposedTask } from "@/lib/orchestrator";
 
-const isDemoMode = !process.env.DATABASE_URL || process.env.DATABASE_URL.includes("placeholder");
+const isDemoMode = process.env.BYPASS_AUTH?.toLowerCase() === "true" || !process.env.DATABASE_URL || process.env.DATABASE_URL.includes("placeholder");
 
 export async function POST(request: Request) {
   let userId = "demo-user";
@@ -20,7 +20,8 @@ export async function POST(request: Request) {
   if (!isDemoMode) {
     const authSession = await auth();
     if (!authSession?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      console.log("[sessions] Auth failed. isDemoMode:", isDemoMode, "BYPASS_AUTH:", process.env.BYPASS_AUTH);
+      return NextResponse.json({ error: `Unauthorized (isDemoMode=${isDemoMode})` }, { status: 401 });
     }
     userId = authSession.user.id;
   }
@@ -79,12 +80,13 @@ export async function POST(request: Request) {
   let todoDescriptions: DecomposedTask[];
   try {
     todoDescriptions = await decomposeTasks(prompt.trim(), agentCount);
-  } catch (error) {
+  } catch (error: any) {
     console.error("[orchestrator] Failed to decompose prompt:", error);
+    const errorMsg = error instanceof Error ? error.message : String(error);
     const failedSession = getSession(sessionId);
     if (failedSession) failedSession.status = "failed";
     return NextResponse.json(
-      { error: "Failed to decompose prompt" },
+      { error: `Decomposition failed: ${errorMsg}` },
       { status: 500 },
     );
   }

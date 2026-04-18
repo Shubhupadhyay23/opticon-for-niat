@@ -1,6 +1,8 @@
-import Dedalus from "dedalus-labs";
+import { Dedalus } from "dedalus-labs";
 
-const client = new Dedalus();
+const client = new Dedalus({
+  apiKey: process.env.DEDALUS_API_KEY,
+});
 
 /** A single task with its lane assignment from the orchestrator. */
 export interface DecomposedTask {
@@ -9,15 +11,42 @@ export interface DecomposedTask {
 }
 
 /**
+ * Extract the first valid JSON object from a string by tracking balanced braces.
+ * Handles cases where LLM returns reasoning text before/after the JSON.
+ */
+function extractJSON(text: string): string {
+  // First try: extract from markdown code blocks
+  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (codeBlockMatch) {
+    return codeBlockMatch[1].trim();
+  }
+
+  const start = text.indexOf("{");
+  if (start === -1) throw new Error("No JSON object found in response");
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (escaped) { escaped = false; continue; }
+    if (ch === "\\") { escaped = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  throw new Error("Unbalanced braces in JSON response");
+}
+
+/**
  * Decompose a prompt into granular, step-by-step tasks grouped into parallel
  * lanes using Claude Sonnet via the Dedalus Labs API.
- *
- * Each lane represents an independent stream of work that one agent handles
- * sequentially. Different lanes run in parallel.
- *
- * When `taskCount` is provided the LLM produces exactly that many tasks.
- * When omitted the LLM decides (up to `maxTasks`). Lanes are capped at
- * `maxLanes`.
  */
 export async function decomposeTasks(
   prompt: string,
@@ -29,69 +58,71 @@ export async function decomposeTasks(
     ? `exactly ${taskCount}`
     : `as many as needed (minimum 1, maximum ${maxTasks})`;
 
-  const response = await client.chat.completions.create({
-    model: "anthropic/claude-sonnet-4-20250514",
-    max_tokens: 4096,
-    messages: [
-      {
-        role: "system",
-        content: `You are a JSON API that breaks user requests into small, simple, granular tasks grouped into parallel lanes. You respond with raw JSON only, never natural language.
+  try {
+    console.log("[orchestrator:planner] Sending prompt to Dedalus...");
+    const response = await client.chat.completions.create({
+      model: "anthropic/claude-sonnet-4-5-20250929",
+      max_tokens: 4096,
+      messages: [
+        {
+          role: "system",
+          content: `You are a JSON API that breaks user requests into small, simple, granular tasks grouped into parallel lanes. You respond with raw JSON only, never natural language.
 
-Each lane is assigned to one AI agent on its own cloud desktop with a browser and terminal. Tasks within a lane run sequentially (the agent does task 1, then task 2, etc.). Different lanes run in parallel on separate machines.
+Each lane is assigned to one AI agent on its own cloud desktop with a browser and terminal. Tasks within a lane run sequentially. Different lanes run in parallel.
 
 Deciding lanes:
-- Group tasks into the same lane when they depend on each other or share state (same browser session, same terminal, same files)
-- Use separate lanes only for work that is truly independent (e.g. researching two different companies, setting up two unrelated services)
-- Most requests need just 1 lane. Use multiple lanes only when there's a clear parallelism opportunity.
+- Use same lane for tasks that share state or depend on each other.
+- Use separate lanes only for independent work.
 - Maximum ${maxLanes} lanes.
 
-Bias toward simplicity and granularity:
-- Each task should be ONE simple action or a very short sequence (2-3 steps max)
-- Prefer many small tasks over fewer complex ones
-- Bad: "Set up a Node.js project with Express, add routes, configure middleware, and deploy"
-- Good: "Open terminal. Run npm init -y && npm install express. Create index.js with a hello world Express server listening on port 3000."
-- Bad: "Research competitors and create a comparison spreadsheet"
-- Good: "Open browser and go to google.com. Search for [specific competitor]. Find their pricing page and note the plan names and prices."
-
-Rules for each task description:
-- Start with the literal first action: "Open browser and go to ..." or "Open terminal and run ..."
-- Use specific URLs, commands, file paths, and values — never say "appropriate" or "as needed"
-- End with how the agent knows it's done: "Confirm the page shows ..." or "Verify the file exists"
-- No branching, conditionals, or "if X then Y" logic — keep it linear
-- One sentence is fine. Three sentences is the max.`,
-      },
-      {
-        role: "user",
-        content: `Break the following request into ${countInstruction} small, granular tasks grouped into lanes. Each task should be a simple, concrete action. Err on the side of more tasks — it's better to have 5 small todos than 2 big ones.
+Bias toward simplicity and granularity. Each task should be ONE simple action.
+End each task by describing how the agent knows it's done.`,
+        },
+        {
+          role: "user",
+          content: `Break the following request into ${countInstruction} small, granular tasks grouped into lanes. Each task should be a simple, concrete action. 
 
 Request: ${prompt.trim()}
 
 Return a JSON object with a "todos" array where each item has:
 - "description": the task instruction
-- "lane": integer lane number (starting from 0)
+- "lane": integer lane number (starting from 0)`,
+        },
+      ],
+    });
 
-Tasks within the same lane will run in order. Different lanes run in parallel.`,
-      },
-    ],
-  });
+    const text = response.choices[0].message.content || "";
+    console.log("[orchestrator:parser] Raw response received.");
 
-  let text = response.choices[0].message.content || "";
-  console.log("[orchestrator] Sonnet response:", text.substring(0, 500));
+    try {
+      const json = extractJSON(text);
+      const parsed = JSON.parse(json);
 
-  // Strip markdown code fences if present
-  text = text.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
+      if (!parsed.todos || !Array.isArray(parsed.todos)) {
+        throw new Error("Missing 'todos' array in parsed JSON");
+      }
 
-  const parsed = JSON.parse(text);
-  if (!parsed.todos || !Array.isArray(parsed.todos)) {
-    throw new Error("Response missing 'todos' array");
+      const tasks: DecomposedTask[] = parsed.todos
+        .slice(0, maxTasks)
+        .map((t: any) => ({
+          description: String(t.description || t.task || "Process task"),
+          lane: Math.min(Number(t.lane ?? 0), maxLanes - 1),
+        }));
+
+      if (tasks.length === 0) throw new Error("Parsed 'todos' array is empty");
+
+      console.log(`[orchestrator:parser] Successfully parsed ${tasks.length} tasks.`);
+      return tasks;
+    } catch (parseError) {
+      console.error("[orchestrator:parser] Failed to parse LLM response:", parseError);
+      throw parseError; // Caught by outer block
+    }
+  } catch (error) {
+    console.warn("[orchestrator:failover] Decomposition failed. Using fallback single-task mode.", error);
+    // FALLBACK: Return the original prompt as a single task in lane 0
+    return [{
+      description: prompt.trim(),
+      lane: 0
+    }];
   }
-
-  const todos: DecomposedTask[] = parsed.todos
-    .slice(0, maxTasks)
-    .map((t: { description: string; lane?: number }) => ({
-      description: t.description,
-      lane: Math.min(t.lane ?? 0, maxLanes - 1),
-    }));
-
-  return todos;
 }
