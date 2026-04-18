@@ -423,7 +423,8 @@ app.prepare().then(() => {
     socket.on("agent:join", (data: AgentJoinEvent) => {
       const { sessionId, agentId } = data;
       socket.join(`session:${sessionId}`);
-      console.log(`[socket.io] Worker ${agentId} joined session:${sessionId}`);
+      socket.join(`agent:${agentId}`);
+      console.log(`[socket.io] Worker ${agentId} joined session:${sessionId} and agent:${agentId}`);
 
       // Forward to browser clients
       const room = `session:${sessionId}`;
@@ -454,16 +455,16 @@ app.prepare().then(() => {
           agentId,
         });
         
-        console.log(`[server] Assigning initial task ${nextTask.id} to agent ${agentId}`);
-        // Send task to worker
+        console.log(`[server] Assigning initial task ${nextTask.id} to agent ${agentId} via room agent:${agentId}`);
+        // Send task to worker in its specific room
         const whiteboard = getWhiteboard(sessionId);
-        socket.emit("task:assign", {
+        io.to(`agent:${agentId}`).emit("task:assign", {
           taskId: nextTask.id,
           description: nextTask.description,
           whiteboard,
         });
       } else {
-        console.log(`[server] No pending tasks for agent ${agentId} on stream_ready`);
+        console.warn(`[server] ⚠️ No pending tasks for agent ${agentId} on stream_ready`);
       }
       // Agent idles if no pending tasks — don't terminate
     });
@@ -665,7 +666,8 @@ app.prepare().then(() => {
         });
 
         const whiteboard = getWhiteboard(sessionId);
-        socket.emit("task:assign", {
+        console.log(`[server] Assigning next task ${nextTask.id} to agent ${agentId} via room agent:${agentId}`);
+        io.to(`agent:${agentId}`).emit("task:assign", {
           taskId: nextTask.id,
           description: nextTask.description,
           whiteboard,

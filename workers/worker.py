@@ -308,6 +308,7 @@ async def main():
 
     @sio.on("task:assign")
     async def on_task_assign(data):
+        print("📥 TASK RECEIVED:", data.get("taskId", "unknown"))
         await task_queue.put(data)
 
     @sio.on("task:none")
@@ -424,10 +425,11 @@ async def main():
         while not terminated.is_set():
             # Wait for a task or termination signal
             try:
-                task_data = await asyncio.wait_for(task_queue.get(), timeout=2.0)
+                task_data = await asyncio.wait_for(task_queue.get(), timeout=5.0)
             except asyncio.TimeoutError:
                 if terminated.is_set():
                     break
+                print("⏳ Still waiting for task...")
                 continue
 
             task_id = task_data["taskId"]
