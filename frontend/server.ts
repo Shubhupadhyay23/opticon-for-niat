@@ -225,6 +225,7 @@ app.prepare().then(() => {
       if (agent.status !== "terminated") {
         updateAgentStatus(sessionId, agent.id, "terminated");
         io.to(`session:${sessionId}`).emit("agent:terminated", {
+          sessionId,
           agentId: agent.id,
         });
       }
@@ -442,6 +443,7 @@ app.prepare().then(() => {
 
       // Forward to browser clients
       io.to(`session:${sessionId}`).emit("agent:stream_ready", {
+        sessionId,
         agentId,
         streamUrl,
       });
@@ -474,6 +476,7 @@ app.prepare().then(() => {
       if (!sessionId) return;
 
       io.to(`session:${sessionId}`).emit("agent:thinking", {
+        sessionId,
         agentId: data.agentId,
         action: data.action,
         timestamp: data.timestamp || new Date().toISOString(),
@@ -532,6 +535,7 @@ app.prepare().then(() => {
       }
 
       io.to(`session:${sessionId}`).emit("agent:reasoning", {
+        sessionId,
         agentId: data.agentId,
         reasoning: data.reasoning,
         timestamp: data.timestamp || new Date().toISOString(),
@@ -571,7 +575,7 @@ app.prepare().then(() => {
       updateAgentStatus(sessionId, agentId, "paused");
       updateAgentSandboxId(sessionId, agentId, sandboxId);
       persistAgentSandboxId(agentId, sandboxId).catch(console.error);
-      io.to(`session:${sessionId}`).emit("agent:paused", { agentId, sandboxId });
+      io.to(`session:${sessionId}`).emit("agent:paused", { sessionId, agentId, sandboxId });
 
       // If all agents are paused, pause the session
       const session = getSession(sessionId);
@@ -586,7 +590,7 @@ app.prepare().then(() => {
       const { sessionId, agentId } = data;
       if (!sessionId) return;
       updateAgentStatus(sessionId, agentId, "expired");
-      io.to(`session:${sessionId}`).emit("agent:sandbox_expired", { agentId });
+      io.to(`session:${sessionId}`).emit("agent:sandbox_expired", { sessionId, agentId });
       console.log(`[server] Agent ${agentId} sandbox expired`);
     });
 
@@ -614,15 +618,31 @@ app.prepare().then(() => {
         data.thumbnail,
         accomplishmentSummary,
       ).catch(console.error);
+
+      // Forward to browser clients (Panopticon/Demo UI)
+      io.to(`session:${sessionId}`).emit("agent:checkpoint", {
+        sessionId,
+        agentId: data.agentId,
+        step: data.step,
+        totalSteps: data.totalSteps,
+        thumbnail: data.thumbnail,
+      });
     });
 
     socket.on("agent:error", (data: AgentErrorEvent) => {
       const { sessionId, agentId, error } = data;
       if (!sessionId) return;
 
+      updateAgentStatus(sessionId, agentId, "error");
+      io.to(`session:${sessionId}`).emit("agent:error", {
+        sessionId,
+        agentId,
+        error,
+      });
+
       // Post error to Slack for human-in-the-loop recovery
       if (getSlackSessionBySessionId(sessionId)) {
-        postErrorToSlack(sessionId, data.error).catch(console.error);
+        postErrorToSlack(sessionId, error).catch(console.error);
       }
     });
 
@@ -635,6 +655,7 @@ app.prepare().then(() => {
       persistTodoStatus(todoId, "completed", result).catch(console.error);
 
       io.to(`session:${sessionId}`).emit("task:completed", {
+        sessionId,
         todoId,
         agentId,
         result,
@@ -773,6 +794,7 @@ app.prepare().then(() => {
 
       updateAgentStatus(sessionId, agentId, "terminated");
       io.to(`session:${sessionId}`).emit("agent:terminated", {
+        sessionId,
         agentId: data.agentId,
       });
 
