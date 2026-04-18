@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 MODEL = "claude-3-5-sonnet-20241022"  # Correct model name for Anthropic
 ENABLE_MOCK_LLM = os.environ.get("ENABLE_MOCK_LLM", "false").lower() == "true"
 MAX_STEPS = 500
-MAX_RETRIES = 3
-RETRY_BASE_DELAY = 2  # seconds
+MAX_RETRIES = 2
+RETRY_BASE_DELAY = 1  # seconds
 HISTORY_KEEP_RECENT = 10  # number of recent screenshot/action exchanges to keep verbatim
 THUMBNAIL_INTERVAL_SECONDS = 10
 MIN_STEPS_BEFORE_DONE = 3  # agent must take at least this many actions before calling done
@@ -76,10 +76,15 @@ async def call_with_retry(client, **kwargs):
 
     for attempt in range(MAX_RETRIES):
         try:
+            # Prevent hangs from legacy/future model experiments
+            current_model = kwargs.get('model', '')
+            if "2025" in current_model:
+                raise ValueError(f"❌ Invalid / Future Model detected: {current_model}")
+
             print(f"🧠 FULL KWARGS: {kwargs}", flush=True)
-            print(f"  (attempt {attempt + 1}/{MAX_RETRIES}) Calling LLM: {kwargs.get('model')}...", flush=True)
+            print(f"  (attempt {attempt + 1}/{MAX_RETRIES}) Calling LLM: {current_model}...", flush=True)
             
-            # Hard 20s timeout as requested for isolation
+            # Hard 20s timeout for isolation
             response = await asyncio.wait_for(client.chat.completions.create(**kwargs), timeout=20.0)
             
             print("✅ LLM response received", flush=True)
@@ -89,7 +94,7 @@ async def call_with_retry(client, **kwargs):
             if attempt == MAX_RETRIES - 1:
                 raise
         except Exception as e:
-            print(f"💥 LLM HARD FAIL: {str(e)}", flush=True)
+            print(f"💥 RAW ERROR: {repr(e)}", flush=True)
             if attempt == MAX_RETRIES - 1:
                 raise
             delay = RETRY_BASE_DELAY * (2 ** attempt)
@@ -149,15 +154,8 @@ def trim_message_history(messages):
 async def run_agent_loop(client, task_description, whiteboard_content="", user_memories="", on_step=None, replay_buffer=None, terminated=None, on_screenshot=None, on_checkpoint=None, agent_type="orchestrator"):
     """
     Observe-think-act loop using Dedalus chat.completions.create().
-
-    Each turn:
-      1. Take a screenshot -> inject as a user message (image_url)
-      2. Model sees the desktop and returns a tool call
-      3. Execute the tool, loop back to 1
-
-    Returns the final summary when the model calls 'done'.
-    If `terminated` (asyncio.Event) is set, exits early.
     """
+    print("🧠 ENTERED run_agent_loop", flush=True)
     profile = AGENT_PROFILES.get(agent_type, AGENT_PROFILES["orchestrator"])
     system_content = profile["prompt"]
     if whiteboard_content:
@@ -212,9 +210,9 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
             
         tools = [t for t in e2b_tools.TOOL_SCHEMAS if t["function"]["name"] in allowed_tool_names]
 
-        # Emit "Thinking" state immediately to provide UI feedback
+        # Emit "Thinking" state immediately with model info
         if on_step:
-            await on_step(step + 1, "thinking", {}, "Analyzing current screen...")
+            await on_step(step + 1, "thinking", {}, f"Calling model {MODEL}...")
 
         try:
             print("🧠 BEFORE LLM...", flush=True)
@@ -340,6 +338,14 @@ async def main():
     task_queue = asyncio.Queue()
     terminated = asyncio.Event()
     force_kill = False
+
+    @sio.on("connect")
+    async def on_connect():
+        print("🔌 Connected to socket server", flush=True)
+
+    @sio.on("disconnect")
+    async def on_disconnect():
+        print("🔌 Disconnected from socket server", flush=True)
 
     @sio.on("task:assign")
     async def on_task_assign(data):
@@ -542,6 +548,8 @@ async def main():
                     return "terminated"
                 return "continue"
 
+            # Execute the loop
+            print("🚀 Calling run_agent_loop...", flush=True)
             try:
                 result = await run_agent_loop(
                     client, task_description,
@@ -567,8 +575,10 @@ async def main():
                     {"error": str(e)},
                 )
                 logger.error("Task %s failed: %s", task_id, e)
+            print("✅ run_agent_loop finished", flush=True)
 
             # Report task completion
+            print("📤 Completing task in store...", flush=True)
             await emit(
                 "task:completed", {"todoId": task_id, "result": result}
             )
