@@ -1,4 +1,4 @@
-dedalus-labs
+requests
 e2b-desktop
 Pillow
 imageio

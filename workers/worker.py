@@ -9,12 +9,14 @@ from io import BytesIO
 
 import socketio
 from e2b_desktop import Sandbox
-from dedalus_labs import AsyncDedalus
 from PIL import Image
 
-from agents import AGENT_PROFILES
-from llm.ollama import ollama_chat
+sys.path.insert(0, os.path.dirname(__file__))
+import e2b_tools
+from memory import MemoryManager
+from replay import ReplayBuffer
 from agents.planner import create_plan
+from llm.ollama import ollama_chat
 from tools.dispatcher import run_tool
 
 logger = logging.getLogger(__name__)
@@ -61,8 +63,8 @@ def make_screenshot_message():
         ],
     }
     return msg, raw_bytes  # Still return raw PNG for replay buffer
-async def call_with_retry(client, **kwargs):
-    """Call the configured LLM provider with exponential backoff on failure."""
+async def call_with_retry(messages, model=MODEL):
+    """Call the Ollama provider with exponential backoff on failure."""
     if ENABLE_MOCK_LLM:
         logger.info("⚡ [MOCK] Bypassing real LLM call...")
         await asyncio.sleep(1)
@@ -70,38 +72,29 @@ async def call_with_retry(client, **kwargs):
         return SimpleNamespace(choices=[
             SimpleNamespace(message=SimpleNamespace(
                 content="I will complete the task.",
-                tool_calls=[SimpleNamespace(id="mock_1", function=SimpleNamespace(name="done", arguments="{}"))]
+                tool_calls=[]
             ))
         ])
 
-    messages = kwargs.get("messages", [])
-    current_model = kwargs.get("model", MODEL)
-
     for attempt in range(MAX_RETRIES):
         try:
-            logger.info("🧠 Calling LLM: %s (Provider: %s, Attempt %d/%d)", current_model, LLM_PROVIDER, attempt + 1, MAX_RETRIES)
+            logger.info("🧠 Calling Ollama: %s (Attempt %d/%d)", model, attempt + 1, MAX_RETRIES)
             
-            if LLM_PROVIDER == "ollama":
-                # Use our native Ollama wrapper (imported from llm.ollama)
-                response_text = await asyncio.to_thread(ollama_chat, messages, model=current_model)
-                logger.info("✅ Ollama response received")
-                
-                from types import SimpleNamespace
-                # Wrap response to match the existing parsing logic
-                return SimpleNamespace(choices=[
-                    SimpleNamespace(message=SimpleNamespace(
-                        content=response_text,
-                        tool_calls=[] # Tools will be parsed via the dispatcher or text detection
-                    ))
-                ])
-            else:
-                # Use standard Dedalus/OpenAI client
-                response = await asyncio.wait_for(client.chat.completions.create(**kwargs), timeout=30.0)
-                logger.info("✅ LLM response received successfully")
-                return response
+            # Use our native Ollama wrapper
+            response_text = await asyncio.to_thread(ollama_chat, messages, model=model)
+            logger.info("✅ Ollama response received")
+            
+            from types import SimpleNamespace
+            # Wrap response to match the existing parsing logic
+            return SimpleNamespace(choices=[
+                SimpleNamespace(message=SimpleNamespace(
+                    content=response_text,
+                    tool_calls=[] 
+                ))
+            ])
                 
         except Exception as e:
-            logger.exception("💥 LLM CALL FAILED: %s", repr(e))
+            logger.exception("💥 OLLAMA CALL FAILED: %s", repr(e))
             if attempt == MAX_RETRIES - 1:
                 raise
             delay = RETRY_BASE_DELAY * (2 ** attempt)
@@ -158,7 +151,7 @@ def trim_message_history(messages):
     ] + recent_part
 
 
-async def run_agent_loop(client, task_description, whiteboard_content="", user_memories="", on_step=None, replay_buffer=None, terminated=None, on_screenshot=None, on_checkpoint=None, agent_type="orchestrator", emit_system_log=None):
+async def run_agent_loop(task_description, whiteboard_content="", user_memories="", on_step=None, replay_buffer=None, terminated=None, on_screenshot=None, on_checkpoint=None, agent_type="orchestrator", emit_system_log=None):
     """
     Observe-think-act loop using Dedalus chat.completions.create().
     """
@@ -230,15 +223,11 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
             if emit_system_log:
                 await emit_system_log(f"Turn {step+1}: Calling LLM...")
 
-            logger.info("🧠 Turn %d: Calling LLM (model=%s, tools=%d)...", step + 1, MODEL, len(tools))
+            logger.info("🧠 Turn %d: Calling Ollama (model=%s, tools=%d)...", step + 1, MODEL, len(tools))
             response = await asyncio.wait_for(
                 call_with_retry(
-                    client,
-                    model=MODEL,
                     messages=messages,
-                    tools=tools,
-                    tool_choice="required", # Force at least one tool call (OpenAI compatible)
-                    max_tokens=2048,
+                    model=MODEL,
                 ),
                 timeout=60.0  # Hard timeout for LLM reasoning
             )
@@ -509,20 +498,9 @@ async def main():
     e2b_tools.init(desktop)
 
     # --- Init LLM client ---
+    logger.info("🚀 Initializing pure Ollama worker (endpoint: %s, model: %s)", LLM_BASE_URL, MODEL)
+    # No client object needed with our requests-based ollama.py wrapper
     client = None
-    if LLM_PROVIDER == "ollama":
-        logger.info("🚀 Initializing Ollama client at %s (model: %s)", LLM_BASE_URL, MODEL)
-        # Use a generic OpenAI-compatible client for Ollama
-        client = AsyncDedalus(api_key="ollama", base_url=LLM_BASE_URL)
-    else:
-        dedalus_api_key = os.environ.get("DEDALUS_API_KEY")
-        if not dedalus_api_key:
-            logger.error("❌ CRITICAL ERROR: DEDALUS_API_KEY is not set in environment!")
-        else:
-            logger.info("🔑 DEDALUS_API_KEY is present (prefix: %s...)", dedalus_api_key[:4])
-        
-        logger.info("🚀 Initializing AsyncDedalus client for model: %s", MODEL)
-        client = AsyncDedalus(api_key=dedalus_api_key)
 
     # --- Replay buffer ---
     replay_buffer = ReplayBuffer()
@@ -683,7 +661,6 @@ async def main():
                     
                     try:
                         step_result = await run_agent_loop(
-                            client, 
                             task["description"],
                             whiteboard_content=whiteboard_content,
                             user_memories=user_memories,
