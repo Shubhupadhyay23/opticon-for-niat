@@ -59,8 +59,8 @@ def make_screenshot_message():
         ],
     }
     return msg, raw_bytes  # Still return raw PNG for replay buffer
-
-
+async def call_with_retry(client, **kwargs):
+    """Call client.chat.completions.create() with exponential backoff on failure."""
     if ENABLE_MOCK_LLM:
         logger.info("⚡ [MOCK] Bypassing real LLM call...")
         await asyncio.sleep(1)
