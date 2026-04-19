@@ -30,7 +30,6 @@ HISTORY_KEEP_RECENT = 10  # number of recent screenshot/action exchanges to keep
 THUMBNAIL_INTERVAL_SECONDS = 10
 MIN_STEPS_BEFORE_DONE = 3  # agent must take at least this many actions before calling done
 CHECKPOINT_INTERVAL = 100  # Pause every N steps for user check-in (Slack only)
-EVENT_THROTTLE_MS = 1000  # Min time between UI updates of the same type
 
 
 def make_screenshot_message():
@@ -41,7 +40,7 @@ def make_screenshot_message():
     img = Image.open(BytesIO(raw_bytes))
     # Reduce quality for smoother UI streaming (60 is the sweet spot for speed vs clarity)
     jpeg_buf = BytesIO()
-    img.save(jpeg_buf, format="JPEG", quality=40)
+    img.save(jpeg_buf, format="JPEG", quality=60)
     jpeg_b64 = base64.b64encode(jpeg_buf.getvalue()).decode("utf-8")
 
     msg = {
@@ -333,18 +332,7 @@ async def main():
     sio = socketio.AsyncClient()
     await sio.connect(socket_url)
 
-    # --- Shared state for throttling ---
-    last_event_times = {}
-
     async def emit(event, data):
-        # Throttle rapidly firing thinking/reasoning events
-        if event in ["agent:thinking", "agent:reasoning"]:
-            now = time.time() * 1000
-            last_time = last_event_times.get(event, 0)
-            if now - last_time < EVENT_THROTTLE_MS:
-                return # Skip this update
-            last_event_times[event] = now
-        
         await sio.emit(event, {"sessionId": session_id, "agentId": agent_id, **data})
 
     # --- Register event handlers BEFORE booting sandbox ---
@@ -418,6 +406,8 @@ async def main():
                 pass
             # Immediate stream start - don't wait for anything else
             desktop.stream.start()
+            # Restore 3s buffer for stream to stabilize
+            time.sleep(3)
             
             # Emit sandbox_ready IMMEDIATELY
             await emit("agent:sandbox_ready", {"sandboxId": desktop.sandbox_id})
