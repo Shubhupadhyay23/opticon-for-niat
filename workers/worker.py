@@ -216,19 +216,19 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
             await on_step(step + 1, "thinking", {}, f"Calling model {MODEL}...")
 
         try:
-            print("🧠 BEFORE LLM...", flush=True)
+            print(f"🧠 Calling LLM (model={MODEL}, tools={len(tools)})...", flush=True)
             response = await asyncio.wait_for(
                 call_with_retry(
                     client,
                     model=MODEL,
                     messages=messages,
                     tools=tools,
-                    tool_choice={"type": "any"},
+                    tool_choice="required", # Force at least one tool call (OpenAI compatible)
                     max_tokens=2048,
                 ),
                 timeout=60.0  # Hard timeout for LLM reasoning
             )
-            print("✅ AFTER LLM", flush=True)
+            print("✅ LLM responded successfully", flush=True)
         except asyncio.TimeoutError:
             print("❌ LLM TIMEOUT after 60s", flush=True)
             if on_step:
@@ -270,16 +270,20 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
                 reasoning = combined or None
 
         if not msg.tool_calls:
-            print("❌ No tool call from LLM", flush=True)
+            print(f"⚠️ No tool call from LLM. Content: {msg.content[:100]}...", flush=True)
             no_tool_retries += 1
             if no_tool_retries >= 3:
                 logger.error("Model returned no tool calls %d times, giving up", no_tool_retries)
                 return msg.content or "(model failed to call tools)"
-            # Model returned no tool calls despite tool_choice — retry with a nudge
-            logger.warning("No tool calls in response at step %d (retry %d/3)", step, no_tool_retries)
+            
+            # Context-aware nudge: if model just talked without acting, remind it
+            nudge = "You must use one of the provided tools to continue (e.g., click, type_text, or done if finished)."
+            if msg.content:
+                nudge = f"I see you said '{msg.content[:50]}...', but you didn't call a tool. " + nudge
+            
             messages.append({
                 "role": "user",
-                "content": "You must use one of the provided tools to continue (e.g., click, type_text, or done if finished). Please respond with a tool call."
+                "content": nudge
             })
             continue
 

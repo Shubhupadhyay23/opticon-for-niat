@@ -79,6 +79,8 @@ function formatToolChip(
       return `scroll(${toolArgs.direction}, ${toolArgs.amount})`;
     case "move_mouse":
       return `move_mouse(${toolArgs.x}, ${toolArgs.y})`;
+    case "thinking":
+      return "thinking...";
     default:
       return `${toolName}({…})`;
   }
