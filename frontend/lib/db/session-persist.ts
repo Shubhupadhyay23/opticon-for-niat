@@ -83,10 +83,14 @@ export async function replaceTodos(sessionId: string, todoList: Todo[]) {
  * Update session status and optionally set completion time
  */
 export async function persistAgentCount(sessionId: string, agentCount: number) {
-  await db
-    .update(sessions)
-    .set({ agentCount })
-    .where(eq(sessions.id, sessionId));
+  try {
+    await db
+      .update(sessions)
+      .set({ agentCount })
+      .where(eq(sessions.id, sessionId));
+  } catch (err) {
+    if (process.env.DEBUG_DB === "true") console.error("DB Error (persistAgentCount):", err);
+  }
 }
 
 export async function persistSessionStatus(
@@ -94,13 +98,17 @@ export async function persistSessionStatus(
   status: string,
   completedAt?: Date
 ) {
-  await db
-    .update(sessions)
-    .set({
-      status,
-      ...(completedAt && { completedAt }),
-    })
-    .where(eq(sessions.id, sessionId));
+  try {
+    await db
+      .update(sessions)
+      .set({
+        status,
+        ...(completedAt && { completedAt }),
+      })
+      .where(eq(sessions.id, sessionId));
+  } catch (err) {
+    if (process.env.DEBUG_DB === "true") console.error("DB Error (persistSessionStatus):", err);
+  }
 }
 
 /**
@@ -146,30 +154,42 @@ export async function persistAgent(agent: Agent) {
 }
 
 export async function persistAgentStatus(agentId: string, status: string) {
-  await db
-    .update(agents)
-    .set({ status })
-    .where(eq(agents.id, agentId));
+  try {
+    await db
+      .update(agents)
+      .set({ status })
+      .where(eq(agents.id, agentId));
+  } catch (err) {
+    if (process.env.DEBUG_DB === "true") console.error("DB Error (persistAgentStatus):", err);
+  }
 }
 
 export async function persistAgentSandboxId(
   agentId: string,
   sandboxId: string
 ) {
-  await db
-    .update(agents)
-    .set({ sandboxId })
-    .where(eq(agents.id, agentId));
+  try {
+    await db
+      .update(agents)
+      .set({ sandboxId })
+      .where(eq(agents.id, agentId));
+  } catch (err) {
+    if (process.env.DEBUG_DB === "true") console.error("DB Error (persistAgentSandboxId):", err);
+  }
 }
 
 export async function persistAgentStreamUrl(
   agentId: string,
   streamUrl: string
 ) {
-  await db
-    .update(agents)
-    .set({ streamUrl })
-    .where(eq(agents.id, agentId));
+  try {
+    await db
+      .update(agents)
+      .set({ streamUrl })
+      .where(eq(agents.id, agentId));
+  } catch (err) {
+    if (process.env.DEBUG_DB === "true") console.error("DB Error (persistAgentStreamUrl):", err);
+  }
 }
 
 export async function persistAgentHeartbeat(agentId: string) {
