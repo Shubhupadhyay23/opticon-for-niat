@@ -12,11 +12,10 @@ from e2b_desktop import Sandbox
 from dedalus_labs import AsyncDedalus
 from PIL import Image
 
-sys.path.insert(0, os.path.dirname(__file__))
-import e2b_tools
-from memory import MemoryManager
-from replay import ReplayBuffer
 from agents import AGENT_PROFILES
+from llm.ollama import ollama_chat
+from agents.planner import create_plan
+from tools.dispatcher import run_tool
 
 logger = logging.getLogger(__name__)
 
@@ -63,11 +62,10 @@ def make_screenshot_message():
     }
     return msg, raw_bytes  # Still return raw PNG for replay buffer
 async def call_with_retry(client, **kwargs):
-    """Call client.chat.completions.create() with exponential backoff on failure."""
+    """Call the configured LLM provider with exponential backoff on failure."""
     if ENABLE_MOCK_LLM:
         logger.info("⚡ [MOCK] Bypassing real LLM call...")
         await asyncio.sleep(1)
-        # Construct a fake response object matching Dedalus/OpenAI schema
         from types import SimpleNamespace
         return SimpleNamespace(choices=[
             SimpleNamespace(message=SimpleNamespace(
@@ -76,26 +74,32 @@ async def call_with_retry(client, **kwargs):
             ))
         ])
 
+    messages = kwargs.get("messages", [])
+    current_model = kwargs.get("model", MODEL)
+
     for attempt in range(MAX_RETRIES):
         try:
-            # Prevent hangs from legacy/future model experiments
-            current_model = kwargs.get('model', '')
-            if "2025" in current_model:
-                raise ValueError(f"❌ Invalid / Future Model detected: {current_model}")
-
-            logger.info("🧠 Calling LLM: %s (attempt %d/%d)", current_model, attempt + 1, MAX_RETRIES)
-            if attempt > 0:
-                logger.debug("Full message history: %s", json.dumps(kwargs.get('messages', []), indent=2))
+            logger.info("🧠 Calling LLM: %s (Provider: %s, Attempt %d/%d)", current_model, LLM_PROVIDER, attempt + 1, MAX_RETRIES)
             
-            # Hard 30s timeout for isolation
-            response = await asyncio.wait_for(client.chat.completions.create(**kwargs), timeout=30.0)
-            
-            logger.info("✅ LLM response received successfully")
-            return response
-        except asyncio.TimeoutError:
-            logger.error("❌ LLM TIMEOUT after 30s (Attempt %d/%d)", attempt + 1, MAX_RETRIES)
-            if attempt == MAX_RETRIES - 1:
-                raise
+            if LLM_PROVIDER == "ollama":
+                # Use our native Ollama wrapper (imported from llm.ollama)
+                response_text = await asyncio.to_thread(ollama_chat, messages, model=current_model)
+                logger.info("✅ Ollama response received")
+                
+                from types import SimpleNamespace
+                # Wrap response to match the existing parsing logic
+                return SimpleNamespace(choices=[
+                    SimpleNamespace(message=SimpleNamespace(
+                        content=response_text,
+                        tool_calls=[] # Tools will be parsed via the dispatcher or text detection
+                    ))
+                ])
+            else:
+                # Use standard Dedalus/OpenAI client
+                response = await asyncio.wait_for(client.chat.completions.create(**kwargs), timeout=30.0)
+                logger.info("✅ LLM response received successfully")
+                return response
+                
         except Exception as e:
             logger.exception("💥 LLM CALL FAILED: %s", repr(e))
             if attempt == MAX_RETRIES - 1:
@@ -299,36 +303,78 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
             })
             continue
 
-        # Got a valid tool call — reset retry counter
+        # Tool Execution Logic
+        action_result = None
+        tool_call_id = None
+        
+        if msg.tool_calls:
+            # Standard tool call (OpenAI-style)
+            tc = msg.tool_calls[0]
+            name = tc.function.name
+            try:
+                args = json.loads(tc.function.arguments)
+            except json.JSONDecodeError:
+                args = {}
+
+            if on_step:
+                await on_step(step + 1, name, args, reasoning)
+
+            last_action_label = f"Tool: {name}"
+            # Core tool execution
+            action_result = e2b_tools.execute_tool(name, args)
+            tool_call_id = tc.id
+        elif "TOOL:" in (msg.content or ""):
+            # Ollama-native "TOOL: name" format (from dispatcher)
+            logger.info("🛠 Detected text-based tool command in Ollama response")
+            try:
+                # Detect tool name for UI feedback
+                lines = msg.content.split("\n")
+                name_line = [l for l in lines if l.startswith("TOOL:")][0]
+                name = name_line.replace("TOOL:", "").strip()
+                if on_step:
+                    await on_step(step + 1, name, {}, reasoning)
+                
+                # Dispatch the actual execute
+                action_result = run_tool(msg.content)
+                tool_call_id = f"ollama_{step}"
+                last_action_label = f"Tool: {name}"
+            except Exception as e:
+                logger.error(f"Failed to parse text-based tool: {e}")
+                action_result = f"ERROR: Failed to parse tool command: {e}"
+                tool_call_id = f"ollama_err_{step}"
+        else:
+            # No tool call detected
+            logger.warning("⚠️ Turn %d: No tool call returned. Content: %s", step + 1, (msg.content or "")[:100])
+            no_tool_retries += 1
+            if no_tool_retries >= 3:
+                logger.error("Model returned no tool calls %d times, giving up", no_tool_retries)
+                return msg.content or "(model failed to call tools)"
+            
+            # Context-aware nudge
+            nudge = "You must use one of the provided tools to continue (e.g., click, type_text, or done if finished)."
+            if msg.content:
+                nudge = f"I see you said '{msg.content[:50]}...', but you didn't call a tool. " + nudge
+            
+            messages.append({"role": "user", "content": nudge})
+            continue
+
+        # Reset retry counter on any valid tool attempting
         no_tool_retries = 0
 
-        # Execute the first tool call (one action per turn)
-        tc = msg.tool_calls[0]
-        name = tc.function.name
-        try:
-            args = json.loads(tc.function.arguments)
-        except json.JSONDecodeError:
-            args = {}
-
-        if on_step:
-            await on_step(step + 1, name, args, reasoning)
-
-        last_action_label = f"Tool: {name}"
-
-        result = e2b_tools.execute_tool(name, args)
-
         # Self-Correction Interceptor
-        if isinstance(result, str) and result.startswith("ERROR:"):
-            logger.warning(f"Self-correction triggered: Tool {name} returned an error.")
-            result += "\n\n[SYSTEM SELF-CORRECTION]: Your previous action failed. Do not blindly repeat it. Reassess the situation, try a different approach, or use the 'replan_strategy' or 'escalate_to_reviewer' tools."
+        if isinstance(action_result, str) and action_result.startswith("ERROR:"):
+            logger.warning(f"Self-correction triggered: Tool returned an error.")
+            action_result += "\n\n[SYSTEM SELF-CORRECTION]: Your previous action failed. Reassess the situation."
 
-        # If done, return the summary
-        if name == "done":
-            messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
-            return result
+        # If 'done' was called (either via tool or text result), return the summary
+        is_done = (msg.tool_calls and msg.tool_calls[0].function.name == "done") or \
+                 ("done" in str(action_result).lower() and "TOOL:done" in (msg.content or ""))
+        
+        if is_done:
+            return action_result
 
-        # Append tool result and continue
-        messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+        # Append tool result and continue to next turn
+        messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": action_result})
 
     return "(max steps reached)"
 
@@ -614,21 +660,47 @@ async def main():
                     return "terminated"
                 return "continue"
 
-            # Execute the loop
-            logger.info("🔥 Task Triggered: %s", task_id[:8])
+            # 1. Multi-Agent Planning Phase
             try:
-                result = await run_agent_loop(
-                    client, task_description,
-                    whiteboard_content=whiteboard_content,
-                    user_memories=user_memories,
-                    on_step=on_step,
-                    replay_buffer=replay_buffer,
-                    terminated=terminated,
-                    on_screenshot=on_screenshot,
-                    on_checkpoint=on_checkpoint if is_slack_session else None,
-                    agent_type=agent_type,
-                    emit_system_log=emit_system_log,
-                )
+                if LLM_PROVIDER == "ollama":
+                    await emit_system_log("🧠 Planning multi-agent strategy...")
+                    plan_data = await asyncio.to_thread(create_plan, task_description, model=MODEL)
+                    tasks = plan_data.get("tasks", [])
+                    await emit_system_log(f"📋 Strategy Created: {len(tasks)} sub-tasks generated.")
+                else:
+                    # Default to single task for other providers (keep it simple for now)
+                    tasks = [{"id": 1, "description": task_description, "agent_type": agent_type}]
+            except Exception as e:
+                logger.error(f"Planning failed: {e}")
+                tasks = [{"id": 1, "description": task_description, "agent_type": agent_type}]
+
+            # 2. Execution Phase (Iterate through tasks)
+            overall_results = []
+            try:
+                for task in tasks:
+                    logger.info("🚀 Executing sub-task: %s", task["description"])
+                    await emit_system_log(f"⚙️ Execution: {task['description']}", detail=f"Agent: {task.get('agent_type')}")
+                    
+                    try:
+                        step_result = await run_agent_loop(
+                            client, 
+                            task["description"],
+                            whiteboard_content=whiteboard_content,
+                            user_memories=user_memories,
+                            on_step=on_step,
+                            replay_buffer=replay_buffer,
+                            terminated=terminated,
+                            on_screenshot=on_screenshot,
+                            on_checkpoint=on_checkpoint if is_slack_session else None,
+                            agent_type=task.get("agent_type", "orchestrator"),
+                            emit_system_log=emit_system_log,
+                        )
+                        overall_results.append(f"Task {task['id']}: {step_result}")
+                    except Exception as e:
+                        logger.error(f"Sub-task {task['id']} failed: {e}")
+                        overall_results.append(f"Task {task['id']}: Failed ({e})")
+
+                result = "\n".join(overall_results)
             except (ConnectionError, TimeoutError, OSError) as e:
                 # E2B sandbox expired or connection lost
                 logger.error("Sandbox connection lost during task %s: %s", task_id, e)
