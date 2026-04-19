@@ -31,7 +31,7 @@ def click(x: int, y: int, button: str = "left", **_kwargs) -> str:
         _sandbox.middle_click(x, y)
     else:
         _sandbox.left_click(x, y)
-    time.sleep(0.1)
+    time.sleep(0.5)
     return f"Clicked ({button}) at ({x}, {y})"
 
 
@@ -47,10 +47,10 @@ def type_text(text: str) -> str:
     for i, part in enumerate(parts):
         if part:
             _sandbox.write(part)
-            time.sleep(0.05)
+            time.sleep(0.1)
         if i < len(parts) - 1:
             _sandbox.press("Enter")
-            time.sleep(0.05)
+            time.sleep(0.1)
     return f"Typed: {text}"
 
 
@@ -78,9 +78,10 @@ def _normalize_key(key: str) -> str | list[str]:
 
 def press_key(key: str, **_kwargs) -> str:
     """Press a key or key combo (e.g. 'enter', 'ctrl+c')."""
-    time.sleep(0.1)
+    time.sleep(0.2)
     normalized = _normalize_key(key)
     _sandbox.press(normalized)
+    time.sleep(0.3)
     return f"Pressed: {normalized}"
 
 
@@ -94,6 +95,7 @@ def scroll(x: int, y: int, direction: str = "down", amount: int = 3) -> str:
     """Scroll at screen coordinates (x, y) in the given direction."""
     _sandbox.move_mouse(x, y)
     _sandbox.scroll(direction=direction, amount=amount)
+    time.sleep(0.5)
     return f"Scrolled {direction} by {amount} at ({x}, {y})"
 
 

@@ -30,6 +30,7 @@ HISTORY_KEEP_RECENT = 10  # number of recent screenshot/action exchanges to keep
 THUMBNAIL_INTERVAL_SECONDS = 10
 MIN_STEPS_BEFORE_DONE = 3  # agent must take at least this many actions before calling done
 CHECKPOINT_INTERVAL = 100  # Pause every N steps for user check-in (Slack only)
+EVENT_THROTTLE_MS = 1000  # Min time between UI updates of the same type
 
 
 def make_screenshot_message():
@@ -40,7 +41,7 @@ def make_screenshot_message():
     img = Image.open(BytesIO(raw_bytes))
     # Reduce quality for smoother UI streaming (60 is the sweet spot for speed vs clarity)
     jpeg_buf = BytesIO()
-    img.save(jpeg_buf, format="JPEG", quality=60)
+    img.save(jpeg_buf, format="JPEG", quality=40)
     jpeg_b64 = base64.b64encode(jpeg_buf.getvalue()).decode("utf-8")
 
     msg = {
@@ -85,8 +86,8 @@ async def call_with_retry(client, **kwargs):
             print(f"🧠 FULL KWARGS: {kwargs}", flush=True)
             print(f"  (attempt {attempt + 1}/{MAX_RETRIES}) Calling LLM: {current_model}...", flush=True)
             
-            # Hard 20s timeout for isolation
-            response = await asyncio.wait_for(client.chat.completions.create(**kwargs), timeout=20.0)
+            # Hard 30s timeout for isolation
+            response = await asyncio.wait_for(client.chat.completions.create(**kwargs), timeout=30.0)
             
             print("✅ LLM response received", flush=True)
             return response
@@ -226,11 +227,11 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
                     tool_choice={"type": "any"},
                     max_tokens=2048,
                 ),
-                timeout=45.0  # Hard timeout for LLM reasoning
+                timeout=60.0  # Hard timeout for LLM reasoning
             )
             print("✅ AFTER LLM", flush=True)
         except asyncio.TimeoutError:
-            print("❌ LLM TIMEOUT after 45s", flush=True)
+            print("❌ LLM TIMEOUT after 60s", flush=True)
             if on_step:
                 await on_step(step + 1, "error", {"error": "LLM timeout"}, "Thinking took too long, retrying...")
             continue
@@ -275,12 +276,12 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
             if no_tool_retries >= 3:
                 logger.error("Model returned no tool calls %d times, giving up", no_tool_retries)
                 return msg.content or "(model failed to call tools)"
-            # Model returned no tool calls despite tool_choice — retry
-            # This can happen if the streaming response is incomplete
+            # Model returned no tool calls despite tool_choice — retry with a nudge
             logger.warning("No tool calls in response at step %d (retry %d/3)", step, no_tool_retries)
-            # Remove the assistant response and screenshot message (will re-add on next iteration)
-            messages.pop()  # assistant response
-            messages.pop()  # screenshot message
+            messages.append({
+                "role": "user",
+                "content": "You must use one of the provided tools to continue (e.g., click, type_text, or done if finished). Please respond with a tool call."
+            })
             continue
 
         # Got a valid tool call — reset retry counter
@@ -332,7 +333,18 @@ async def main():
     sio = socketio.AsyncClient()
     await sio.connect(socket_url)
 
+    # --- Shared state for throttling ---
+    last_event_times = {}
+
     async def emit(event, data):
+        # Throttle rapidly firing thinking/reasoning events
+        if event in ["agent:thinking", "agent:reasoning"]:
+            now = time.time() * 1000
+            last_time = last_event_times.get(event, 0)
+            if now - last_time < EVENT_THROTTLE_MS:
+                return # Skip this update
+            last_event_times[event] = now
+        
         await sio.emit(event, {"sessionId": session_id, "agentId": agent_id, **data})
 
     # --- Register event handlers BEFORE booting sandbox ---
@@ -394,13 +406,23 @@ async def main():
                 desktop = None # Fall through to creation logic
         
         if not desktop:
-            print("🚀 Spawning new E2B sandbox...", flush=True)
+            # Pass resolution to reduce streaming overhead on low-tier infra
+            # Typically supported via kargs in newer e2b-desktop or environmental overrides
+            # We'll try to set the resolution here
             desktop = Sandbox.create(timeout=3600)
-            # Emit sandbox_ready IMMEDIATELY - don't wait for stream
+            
+            # Fallback: force resolution via xrandr inside the sandbox if needed
+            try:
+                desktop.run_command("xrandr --size 1280x720")
+            except:
+                pass
+            # Immediate stream start - don't wait for anything else
+            desktop.stream.start()
+            
+            # Emit sandbox_ready IMMEDIATELY
             await emit("agent:sandbox_ready", {"sandboxId": desktop.sandbox_id})
             
             print(f"✅ Sandbox created: {desktop.sandbox_id}. Initializing stream...", flush=True)
-            desktop.stream.start()
             stream_url = desktop.stream.get_url()
             await emit("agent:stream_ready", {"streamUrl": stream_url})
             print(f"✅ Stream active at {stream_url}", flush=True)

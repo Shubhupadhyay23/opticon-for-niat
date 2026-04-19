@@ -430,6 +430,7 @@ app.prepare().then(() => {
       // Forward to browser clients
       const room = `session:${sessionId}`;
       io.to(room).emit("agent:join", { agentId, sessionId });
+      console.log(`[socket.io] Forwarded agent:join for ${agentId} to session room ${room}`);
     });
 
     socket.on("agent:stream_ready", (data: AgentStreamReadyEvent) => {
@@ -460,6 +461,13 @@ app.prepare().then(() => {
         console.log(`[server] Assigning initial task ${nextTask.id} to agent ${agentId} via room agent:${agentId}`);
         // Send task to worker in its specific room
         const whiteboard = getWhiteboard(sessionId);
+        
+        // Double check room join before emitting
+        if (!socket.rooms.has(`agent:${agentId}`)) {
+          console.warn(`[server] ⚠️ Socket ${socket.id} not yet in room agent:${agentId}, re-joining`);
+          socket.join(`agent:${agentId}`);
+        }
+        
         io.to(`agent:${agentId}`).emit("task:assign", {
           taskId: nextTask.id,
           description: nextTask.description,
