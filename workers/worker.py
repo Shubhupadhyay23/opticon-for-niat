@@ -30,6 +30,7 @@ HISTORY_KEEP_RECENT = 10  # number of recent screenshot/action exchanges to keep
 THUMBNAIL_INTERVAL_SECONDS = 10
 MIN_STEPS_BEFORE_DONE = 3  # agent must take at least this many actions before calling done
 CHECKPOINT_INTERVAL = 100  # Pause every N steps for user check-in (Slack only)
+processed_task_ids = set() # Prevent duplicate task execution
 
 
 def make_screenshot_message():
@@ -152,10 +153,15 @@ def trim_message_history(messages):
     ] + recent_part
 
 
-async def run_agent_loop(client, task_description, whiteboard_content="", user_memories="", on_step=None, replay_buffer=None, terminated=None, on_screenshot=None, on_checkpoint=None, agent_type="orchestrator"):
+async def run_agent_loop(client, task_description, whiteboard_content="", user_memories="", on_step=None, replay_buffer=None, terminated=None, on_screenshot=None, on_checkpoint=None, agent_type="orchestrator", emit_system_log=None):
     """
     Observe-think-act loop using Dedalus chat.completions.create().
     """
+    if emit_system_log:
+        await emit_system_log(f"Entering core loop for model: {MODEL}")
+        if ENABLE_MOCK_LLM:
+            await emit_system_log("⚠️ WARNING: ENABLE_MOCK_LLM is TRUE. Real AI turns will be bypassed.")
+
     print("🧠 ENTERED run_agent_loop", flush=True)
     profile = AGENT_PROFILES.get(agent_type, AGENT_PROFILES["orchestrator"])
     system_content = profile["prompt"]
@@ -216,6 +222,9 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
             await on_step(step + 1, "thinking", {}, f"Calling model {MODEL}...")
 
         try:
+            if emit_system_log:
+                await emit_system_log(f"Turn {step+1}: Calling LLM...")
+
             print(f"🧠 Calling LLM (model={MODEL}, tools={len(tools)})...", flush=True)
             response = await asyncio.wait_for(
                 call_with_retry(
@@ -229,6 +238,8 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
                 timeout=60.0  # Hard timeout for LLM reasoning
             )
             print("✅ LLM responded successfully", flush=True)
+            if emit_system_log:
+                await emit_system_log(f"Turn {step+1}: LLM response received.")
         except asyncio.TimeoutError:
             print("❌ LLM TIMEOUT after 60s", flush=True)
             if on_step:
@@ -339,6 +350,17 @@ async def main():
     async def emit(event, data):
         await sio.emit(event, {"sessionId": session_id, "agentId": agent_id, **data})
 
+    async def emit_system_log(message, detail=None, is_error=False):
+        """Emit a diagnostic log to the UI."""
+        print(f"DEBUG: {message}", flush=True)
+        await emit("agent:thinking", {
+            "action": "Trace" if not is_error else "Error",
+            "reasoning": message,
+            "detail": detail,
+            "isError": is_error,
+            "actionId": f"system-{int(time.time()*1000)}"
+        })
+
     # --- Register event handlers BEFORE booting sandbox ---
     task_queue = asyncio.Queue()
     terminated = asyncio.Event()
@@ -354,7 +376,13 @@ async def main():
 
     @sio.on("task:assign")
     async def on_task_assign(data):
-        print("📥 TASK RECEIVED:", data.get("taskId", "unknown"), flush=True)
+        tid = data.get("taskId", "unknown")
+        if tid in processed_task_ids:
+            print(f"♻️ Task {tid} already processed/queued, skipping duplicate emission", flush=True)
+            return
+        print("📥 TASK RECEIVED:", tid, flush=True)
+        await emit_system_log(f"System: Task assigned ({tid[:8]})")
+        processed_task_ids.add(tid)
         await task_queue.put(data)
 
     @sio.on("task:none")
@@ -588,6 +616,7 @@ async def main():
                     on_screenshot=on_screenshot,
                     on_checkpoint=on_checkpoint if is_slack_session else None,
                     agent_type=agent_type,
+                    emit_system_log=emit_system_log,
                 )
             except (ConnectionError, TimeoutError, OSError) as e:
                 # E2B sandbox expired or connection lost

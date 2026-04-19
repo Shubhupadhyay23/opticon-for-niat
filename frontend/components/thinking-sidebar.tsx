@@ -405,7 +405,9 @@ export function ThinkingSidebar({
                       <p
                         className={cn(
                           "pr-14 text-sm leading-relaxed",
-                          entry.isError
+                          entry.action === "Trace"
+                            ? "text-blue-400 font-mono text-[12px] opacity-80"
+                            : entry.isError || entry.action === "Error"
                             ? "font-medium text-destructive"
                             : "text-foreground/90"
                         )}
