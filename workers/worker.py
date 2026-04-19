@@ -61,11 +61,8 @@ def make_screenshot_message():
     return msg, raw_bytes  # Still return raw PNG for replay buffer
 
 
-async def call_with_retry(client, **kwargs):
-    """Call client.chat.completions.create() with exponential backoff on failure."""
-    
     if ENABLE_MOCK_LLM:
-        print("⚡ [MOCK] Bypassing real LLM call...", flush=True)
+        logger.info("⚡ [MOCK] Bypassing real LLM call...")
         await asyncio.sleep(1)
         # Construct a fake response object matching Dedalus/OpenAI schema
         from types import SimpleNamespace
@@ -83,24 +80,25 @@ async def call_with_retry(client, **kwargs):
             if "2025" in current_model:
                 raise ValueError(f"❌ Invalid / Future Model detected: {current_model}")
 
-            print(f"🧠 FULL KWARGS: {kwargs}", flush=True)
-            print(f"  (attempt {attempt + 1}/{MAX_RETRIES}) Calling LLM: {current_model}...", flush=True)
+            logger.info("🧠 Calling LLM: %s (attempt %d/%d)", current_model, attempt + 1, MAX_RETRIES)
+            if attempt > 0:
+                logger.debug("Full message history: %s", json.dumps(kwargs.get('messages', []), indent=2))
             
             # Hard 30s timeout for isolation
             response = await asyncio.wait_for(client.chat.completions.create(**kwargs), timeout=30.0)
             
-            print("✅ LLM response received", flush=True)
+            logger.info("✅ LLM response received successfully")
             return response
         except asyncio.TimeoutError:
-            print(f"❌ LLM TIMEOUT after 20s (Attempt {attempt + 1})", flush=True)
+            logger.error("❌ LLM TIMEOUT after 30s (Attempt %d/%d)", attempt + 1, MAX_RETRIES)
             if attempt == MAX_RETRIES - 1:
                 raise
         except Exception as e:
-            print(f"💥 RAW ERROR: {repr(e)}", flush=True)
+            logger.exception("💥 LLM CALL FAILED: %s", repr(e))
             if attempt == MAX_RETRIES - 1:
                 raise
             delay = RETRY_BASE_DELAY * (2 ** attempt)
-            print(f"⚠️ Retrying in {delay}s...", flush=True)
+            logger.info("⚠️ Retrying in %ds...", delay)
             await asyncio.sleep(delay)
 
 
@@ -162,7 +160,7 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
         if ENABLE_MOCK_LLM:
             await emit_system_log("⚠️ WARNING: ENABLE_MOCK_LLM is TRUE. Real AI turns will be bypassed.")
 
-    print("🧠 ENTERED run_agent_loop", flush=True)
+    logger.info("🧠 Agent Loop Started (Model=%s, Mock=%s)", MODEL, ENABLE_MOCK_LLM)
     profile = AGENT_PROFILES.get(agent_type, AGENT_PROFILES["orchestrator"])
     system_content = profile["prompt"]
     if whiteboard_content:
@@ -184,10 +182,10 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
     for step in range(MAX_STEPS):
         # Check for termination between steps
         if terminated is not None and terminated.is_set():
-            print(f"Terminated during task at step {step}", flush=True)
+            logger.info("Terminated during task at step %d", step)
             return "(terminated by user)"
 
-        print(f"🚀 ENTERED AGENT LOOP TURN {step + 1}", flush=True)
+        logger.info("🚀 TURN %d START", step + 1)
 
         # Checkpoint: pause every CHECKPOINT_INTERVAL steps for Slack check-in
         if on_checkpoint and step > 0 and step % CHECKPOINT_INTERVAL == 0:
@@ -225,7 +223,7 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
             if emit_system_log:
                 await emit_system_log(f"Turn {step+1}: Calling LLM...")
 
-            print(f"🧠 Calling LLM (model={MODEL}, tools={len(tools)})...", flush=True)
+            logger.info("🧠 Turn %d: Calling LLM (model=%s, tools=%d)...", step + 1, MODEL, len(tools))
             response = await asyncio.wait_for(
                 call_with_retry(
                     client,
@@ -237,16 +235,16 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
                 ),
                 timeout=60.0  # Hard timeout for LLM reasoning
             )
-            print("✅ LLM responded successfully", flush=True)
+            logger.info("✅ Turn %d: LLM success", step + 1)
             if emit_system_log:
                 await emit_system_log(f"Turn {step+1}: LLM response received.")
         except asyncio.TimeoutError:
-            print("❌ LLM TIMEOUT after 60s", flush=True)
+            logger.error("❌ Turn %d: LLM TIMEOUT after 60s", step + 1)
             if on_step:
                 await on_step(step + 1, "error", {"error": "LLM timeout"}, "Thinking took too long, retrying...")
             continue
         except Exception as e:
-            print(f"❌ LLM ERROR: {e}")
+            logger.exception("❌ Turn %d: LLM CRITICAL ERROR: %s", step + 1, e)
             raise
 
         choice = response.choices[0]
@@ -281,7 +279,7 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
                 reasoning = combined or None
 
         if not msg.tool_calls:
-            print(f"⚠️ No tool call from LLM. Content: {msg.content[:100]}...", flush=True)
+            logger.warning("⚠️ Turn %d: No tool call returned. Content: %s", step + 1, (msg.content or "")[:100])
             no_tool_retries += 1
             if no_tool_retries >= 3:
                 logger.error("Model returned no tool calls %d times, giving up", no_tool_retries)
@@ -352,7 +350,7 @@ async def main():
 
     async def emit_system_log(message, detail=None, is_error=False):
         """Emit a diagnostic log to the UI."""
-        print(f"DEBUG: {message}", flush=True)
+        logger.info("DIAGNOSTIC: %s", message)
         await emit("agent:thinking", {
             "action": "Trace" if not is_error else "Error",
             "reasoning": message,
@@ -464,7 +462,11 @@ async def main():
     # --- Init Daedalus client ---
     dedalus_api_key = os.environ.get("DEDALUS_API_KEY")
     if not dedalus_api_key:
-        print("❌ CRITICAL ERROR: DEDALUS_API_KEY is not set in environment!", flush=True)
+        logger.error("❌ CRITICAL ERROR: DEDALUS_API_KEY is not set in environment!")
+    else:
+        logger.info("🔑 DEDALUS_API_KEY is present (prefix: %s...)", dedalus_api_key[:4])
+    
+    logger.info("🚀 Initializing AsyncDedalus client for model: %s", MODEL)
     client = AsyncDedalus(api_key=dedalus_api_key)
 
     # --- Replay buffer ---
@@ -604,7 +606,7 @@ async def main():
                 return "continue"
 
             # Execute the loop
-            print(f"🚀 Execution started: {task_id[:8]}", flush=True)
+            logger.info("🔥 Task Triggered: %s", task_id[:8])
             try:
                 result = await run_agent_loop(
                     client, task_description,
