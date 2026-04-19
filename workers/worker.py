@@ -20,8 +20,11 @@ from agents import AGENT_PROFILES
 
 logger = logging.getLogger(__name__)
 
-# MODEL = "openai/gpt-4o-mini"
-MODEL = "claude-3-5-sonnet-20241022"  # Correct model name for Anthropic
+# -- LLM Configuration --
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "dedalus").lower() # "dedalus" or "ollama"
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:11434/v1")
+MODEL = os.environ.get("LLM_MODEL", "claude-3-5-sonnet-20241022" if LLM_PROVIDER == "dedalus" else "llama3.1")
+
 ENABLE_MOCK_LLM = os.environ.get("ENABLE_MOCK_LLM", "false").lower() == "true"
 MAX_STEPS = 500
 MAX_RETRIES = 2
@@ -459,15 +462,21 @@ async def main():
     # --- Init tools ---
     e2b_tools.init(desktop)
 
-    # --- Init Daedalus client ---
-    dedalus_api_key = os.environ.get("DEDALUS_API_KEY")
-    if not dedalus_api_key:
-        logger.error("❌ CRITICAL ERROR: DEDALUS_API_KEY is not set in environment!")
+    # --- Init LLM client ---
+    client = None
+    if LLM_PROVIDER == "ollama":
+        logger.info("🚀 Initializing Ollama client at %s (model: %s)", LLM_BASE_URL, MODEL)
+        # Use a generic OpenAI-compatible client for Ollama
+        client = AsyncDedalus(api_key="ollama", base_url=LLM_BASE_URL)
     else:
-        logger.info("🔑 DEDALUS_API_KEY is present (prefix: %s...)", dedalus_api_key[:4])
-    
-    logger.info("🚀 Initializing AsyncDedalus client for model: %s", MODEL)
-    client = AsyncDedalus(api_key=dedalus_api_key)
+        dedalus_api_key = os.environ.get("DEDALUS_API_KEY")
+        if not dedalus_api_key:
+            logger.error("❌ CRITICAL ERROR: DEDALUS_API_KEY is not set in environment!")
+        else:
+            logger.info("🔑 DEDALUS_API_KEY is present (prefix: %s...)", dedalus_api_key[:4])
+        
+        logger.info("🚀 Initializing AsyncDedalus client for model: %s", MODEL)
+        client = AsyncDedalus(api_key=dedalus_api_key)
 
     # --- Replay buffer ---
     replay_buffer = ReplayBuffer()
