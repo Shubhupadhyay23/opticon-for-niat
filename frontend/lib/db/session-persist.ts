@@ -19,6 +19,7 @@ export async function persistSession(
     mockStore.persistSession({
       id, userId, prompt, agentCount, status,
       createdAt: new Date(),
+      completedAt: null,
       isPanopticon: isPanopticon ? "true" : "false"
     });
     return;
