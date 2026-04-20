@@ -1,8 +1,4 @@
-import { Dedalus } from "dedalus-labs";
-
-const client = new Dedalus({
-  apiKey: process.env.DEDALUS_API_KEY,
-});
+import { ollamaChat } from "./llm/ollama";
 
 /** A single task with its lane assignment from the orchestrator. */
 export interface DecomposedTask {
@@ -51,23 +47,16 @@ async function callPlanner(
   prompt: string,
   systemInstruction: string,
   userInstruction: string,
-  timeoutMs: number = 15000
+  timeoutMs: number = 30000
 ): Promise<string> {
-  const llmCall = client.chat.completions.create({
-    model: "anthropic/claude-sonnet-4-5-20250929",
-    max_tokens: 4096,
-    messages: [
-      { role: "system", content: systemInstruction },
-      { role: "user", content: `${userInstruction}\n\nTask: ${prompt.trim()}` },
-    ],
+  // Use our local Ollama client instead of Dedalus
+  return await ollamaChat([
+    { role: "system", content: systemInstruction },
+    { role: "user", content: `${userInstruction}\n\nTask: ${prompt.trim()}` }
+  ], {
+    temperature: 0.1,
+    max_tokens: 1024
   });
-
-  const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error("Planner timed out")), timeoutMs)
-  );
-
-  const response = await Promise.race([llmCall, timeout]);
-  return response.choices[0].message.content || "";
 }
 
 /**

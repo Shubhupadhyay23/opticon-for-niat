@@ -6,9 +6,7 @@
  * instead of raw tool names like "Tool: click".
  */
 
-import Dedalus from "dedalus-labs";
-
-const client = new Dedalus();
+import { ollamaChat } from "../llm/ollama";
 
 export interface BufferedAction {
   tool: string;
@@ -35,23 +33,22 @@ export async function summarizeActions(
   });
 
   try {
-    const response = await client.chat.completions.create({
-      model: "anthropic/claude-haiku-4-5-20251001",
-      max_tokens: 100,
-      messages: [
-        {
-          role: "system",
-          content:
-            "Summarize what an AI agent is doing on a computer desktop in ONE short sentence (under 15 words). Be specific and describe the intent, not the individual actions. Examples: \"Installing project dependencies\", \"Filling out the login form\", \"Navigating to the settings page\". Respond with the sentence only, no quotes.",
-        },
-        {
-          role: "user",
-          content: `Recent actions:\n${lines.join("\n")}`,
-        },
-      ],
+    const response = await ollamaChat([
+      {
+        role: "system",
+        content:
+          "Summarize what an AI agent is doing on a computer desktop in ONE short sentence (under 15 words). Be specific and describe the intent, not the individual actions. Examples: \"Installing project dependencies\", \"Filling out the login form\", \"Navigating to the settings page\". Respond with the sentence only, no quotes.",
+      },
+      {
+        role: "user",
+        content: `Recent actions:\n${lines.join("\n")}`,
+      },
+    ], {
+      temperature: 0.1,
+      max_tokens: 100
     });
 
-    return response.choices[0].message.content?.trim() || "Working...";
+    return response.trim() || "Working...";
   } catch (err) {
     console.error("[summarize-actions] Haiku call failed:", err);
     return "Working...";
