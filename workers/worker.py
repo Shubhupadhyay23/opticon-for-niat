@@ -230,8 +230,15 @@ async def run_agent_loop(task_description, whiteboard_content="", user_memories=
                     messages=messages,
                     model=MODEL,
                 ),
-                timeout=60.0  # Hard timeout for LLM reasoning
+                timeout=90.0  # Increased timeout for Ollama local runs
             )
+            
+            choice = response.choices[0]
+            msg = choice.message
+            
+            # 👁️ ALWAYS emit thoughts to the UI thinking sidebar
+            if on_step and msg.content:
+                await on_step(step + 1, "thinking", {"reasoning": msg.content}, msg.content[:100] + "...")
             logger.info("✅ Turn %d: LLM success", step + 1)
             if emit_system_log:
                 await emit_system_log(f"Turn {step+1}: LLM response received.")
@@ -275,12 +282,15 @@ async def run_agent_loop(task_description, whiteboard_content="", user_memories=
                 combined = " ".join(text_parts).strip()
                 reasoning = combined or None
 
-        if not msg.tool_calls:
+        # Look for text-based tool commands (TOOL: name)
+        has_text_tool = msg.content and ("TOOL:" in msg.content or "ACTION:" in msg.content)
+
+        if not msg.tool_calls and not has_text_tool:
             logger.warning("⚠️ Turn %d: No tool call returned. Content: %s", step + 1, (msg.content or "")[:100])
             no_tool_retries += 1
-            if no_tool_retries >= 3:
+            if no_tool_retries >= 5:
                 logger.error("Model returned no tool calls %d times, giving up", no_tool_retries)
-                return msg.content or "(model failed to call tools)"
+                return msg.content or "(model failed to generate tool command)"
             
             # Context-aware nudge: if model just talked without acting, remind it
             nudge = "You must use one of the provided tools to continue (e.g., click, type_text, or done if finished)."
