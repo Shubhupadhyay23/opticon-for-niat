@@ -63,7 +63,7 @@ def make_screenshot_message():
         ],
     }
     return msg, raw_bytes  # Still return raw PNG for replay buffer
-async def call_with_retry(messages, model=MODEL):
+async def call_with_retry(messages, model=MODEL, base_url=LLM_BASE_URL):
     """Call the Ollama provider with exponential backoff on failure."""
     if ENABLE_MOCK_LLM:
         logger.info("⚡ [MOCK] Bypassing real LLM call...")
@@ -81,7 +81,7 @@ async def call_with_retry(messages, model=MODEL):
             logger.info("🧠 Calling Ollama: %s (Attempt %d/%d)", model, attempt + 1, MAX_RETRIES)
             
             # Use our native Ollama wrapper
-            response_text = await asyncio.to_thread(ollama_chat, messages, model=model)
+            response_text = await asyncio.to_thread(ollama_chat, messages, model=model, base_url=base_url)
             logger.info("✅ Ollama response received")
             
             from types import SimpleNamespace
@@ -229,6 +229,7 @@ async def run_agent_loop(task_description, whiteboard_content="", user_memories=
                 call_with_retry(
                     messages=messages,
                     model=MODEL,
+                    base_url=LLM_BASE_URL
                 ),
                 timeout=90.0  # Increased timeout for Ollama local runs
             )
@@ -653,7 +654,7 @@ async def main():
             try:
                 print("=== PLANNER START ===", flush=True)
                 await emit_system_log("🧠 Planning multi-agent strategy...")
-                plan_data = await asyncio.to_thread(create_plan, task_description, model=MODEL)
+                plan_data = await asyncio.to_thread(create_plan, task_description, model=MODEL, base_url=LLM_BASE_URL)
                 tasks = plan_data.get("tasks", [])
                 print(f"=== PLANNER OUTPUT: {len(tasks)} tasks ===", flush=True)
                 await emit_system_log(f"📋 Strategy Created: {len(tasks)} sub-tasks generated.")

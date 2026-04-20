@@ -47,8 +47,12 @@ def ollama_chat(messages, model="llama3.1", base_url="http://localhost:11434"):
         formatted_messages.append(msg)
 
     print(f"=== OLLAMA CHAT START === (Model: {model})", flush=True)
+    
+    # Standardize URL: strip trailing /v1 if present and ensure no trailing slash
+    clean_base = base_url.replace("/v1", "").rstrip("/")
+    url = f"{clean_base}/api/chat"
+    
     try:
-        url = f"{base_url}/api/chat"
         payload = {
             "model": model,
             "messages": formatted_messages,
@@ -72,8 +76,8 @@ def ollama_chat(messages, model="llama3.1", base_url="http://localhost:11434"):
         return content
         
     except requests.exceptions.ConnectionError:
-        logger.error("Could not connect to Ollama. Is it running? (ollama serve)")
-        raise Exception("Ollama connection refused. Please start Ollama locally.")
+        logger.error(f"Could not connect to Ollama at {url}. Is it running? (ollama serve)")
+        raise Exception(f"Ollama connection refused at {url}. If running on Railway, you MUST set LLM_BASE_URL to a public tunnel (like ngrok).")
     except Exception as e:
         logger.exception("Error during Ollama chat call")
         raise

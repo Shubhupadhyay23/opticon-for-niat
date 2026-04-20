@@ -32,14 +32,14 @@ Rules:
 3. Return ONLY the JSON object, NO other text.
 """
 
-def create_plan(user_input, model="llama3.1"):
-    print("=== PLANNER START ===", flush=True)
+def create_plan(user_input, model="llama3.1", base_url="http://localhost:11434"):
+    print(f"=== PLANNER START === (Base URL: {base_url})", flush=True)
     print(f"Goal: {user_input}", flush=True)
     logger.info("🧠 Planning task: %s", user_input)
     response = ollama_chat([
         {"role": "system", "content": PLANNER_SYSTEM_PROMPT},
         {"role": "user", "content": user_input}
-    ], model=model)
+    ], model=model, base_url=base_url)
     
     print(f"=== PLANNER OUTPUT ===\n{response}\n====================", flush=True)
     
