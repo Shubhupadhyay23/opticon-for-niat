@@ -20,7 +20,7 @@ try {
     _useBilling = flowglad.useBilling;
   } else {
     _useBilling = () => ({
-      checkFeatureAccess: () => false,
+      checkFeatureAccess: () => true, // All features unlocked for Ollama/Local mode
       createCheckoutSession: async () => {},
       loaded: true,
     });
