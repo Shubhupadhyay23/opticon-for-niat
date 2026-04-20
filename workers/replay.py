@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Replay frame capture and upload module.
 

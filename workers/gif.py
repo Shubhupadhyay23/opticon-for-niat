@@ -5,6 +5,7 @@ Converts captured replay frames (320x180 JPEG thumbnails) into animated GIFs
 for timelapse visualization of agent sessions.
 """
 
+from __future__ import annotations
 import io
 import logging
 import os

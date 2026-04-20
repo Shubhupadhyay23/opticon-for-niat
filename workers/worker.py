@@ -1,3 +1,4 @@
+from __future__ import annotations
 import asyncio
 import base64
 import json
@@ -15,6 +16,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import e2b_tools
 from memory import MemoryManager
 from replay import ReplayBuffer
+from agents import AGENT_PROFILES
 from agents.planner import create_plan
 from llm.ollama import ollama_chat
 from tools.dispatcher import run_tool
