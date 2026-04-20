@@ -1,7 +1,8 @@
-import { db } from "./index";
+import { db, isMockDB } from "./index";
 import { sessions, todos, agents } from "./schema";
 import { eq, desc } from "drizzle-orm";
 import type { Todo, Agent } from "../types";
+import { mockStore } from "./mock-store";
 
 /**
  * Persist a new session to the database
@@ -14,6 +15,15 @@ export async function persistSession(
   status: string,
   isPanopticon: boolean = false
 ) {
+  if (isMockDB) {
+    mockStore.persistSession({
+      id, userId, prompt, agentCount, status,
+      createdAt: new Date(),
+      isPanopticon: isPanopticon ? "true" : "false"
+    });
+    return;
+  }
+
   try {
     await db.insert(sessions).values({
       id,
@@ -57,6 +67,11 @@ export async function persistTodos(sessionId: string, todoList: Todo[]) {
  * Deletes all existing todos and inserts new ones in a transaction
  */
 export async function replaceTodos(sessionId: string, todoList: Todo[]) {
+  if (isMockDB) {
+    mockStore.replaceTodos(sessionId, todoList);
+    return;
+  }
+
   try {
     // neon-http doesn't support transactions — run as sequential queries
     await db.delete(todos).where(eq(todos.sessionId, sessionId));
@@ -98,6 +113,11 @@ export async function persistSessionStatus(
   status: string,
   completedAt?: Date
 ) {
+  if (isMockDB) {
+    mockStore.updateSession(sessionId, { status, ...(completedAt && { completedAt }) });
+    return;
+  }
+
   try {
     await db
       .update(sessions)
@@ -119,6 +139,11 @@ export async function persistTodoStatus(
   status: string,
   result?: string
 ) {
+  if (isMockDB) {
+    mockStore.updateTodoStatus(todoId, status, result);
+    return;
+  }
+
   try {
     await db
       .update(todos)
@@ -135,6 +160,11 @@ export async function persistTodoStatus(
 // --- Agent persistence helpers ---
 
 export async function persistAgent(agent: Agent) {
+  if (isMockDB) {
+    mockStore.persistAgent(agent);
+    return;
+  }
+
   try {
     await db.insert(agents).values({
       id: agent.id,
@@ -204,6 +234,9 @@ export async function persistAgentHeartbeat(agentId: string) {
 }
 
 export async function getSessionAgents(sessionId: string) {
+  if (isMockDB) {
+    return mockStore.getAgents(sessionId);
+  }
   return db
     .select()
     .from(agents)
@@ -211,6 +244,16 @@ export async function getSessionAgents(sessionId: string) {
 }
 
 export async function getSessionWithDetails(sessionId: string) {
+  if (isMockDB) {
+    const session = mockStore.getSession(sessionId);
+    if (!session) return null;
+    return {
+      ...session,
+      todos: mockStore.getTodos(sessionId),
+      agents: mockStore.getAgents(sessionId)
+    };
+  }
+
   const [session] = await db
     .select()
     .from(sessions)
