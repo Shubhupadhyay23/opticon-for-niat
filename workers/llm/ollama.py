@@ -13,8 +13,10 @@ def ollama_chat(messages, model="llama3.1", base_url="http://localhost:11434"):
     formatted_messages = []
     
     for m in messages:
+        role = m.get("role", "user")
+        print(f"DEBUG: Processing message role: {role}", flush=True)
         msg = {
-            "role": m.get("role", "user"),
+            "role": role,
             "content": ""
         }
         
@@ -44,6 +46,7 @@ def ollama_chat(messages, model="llama3.1", base_url="http://localhost:11434"):
         
         formatted_messages.append(msg)
 
+    print(f"=== OLLAMA CHAT START === (Model: {model})", flush=True)
     try:
         url = f"{base_url}/api/chat"
         payload = {
@@ -59,11 +62,14 @@ def ollama_chat(messages, model="llama3.1", base_url="http://localhost:11434"):
         response = requests.post(url, json=payload, timeout=90)
         
         if response.status_code != 200:
+            print(f"=== OLLAMA ERROR: {response.status_code} ===", flush=True)
             logger.error(f"Ollama API error: {response.status_code} - {response.text}")
             raise Exception(f"Ollama error: {response.text}")
             
         result = response.json()
-        return result.get("message", {}).get("content", "")
+        content = result.get("message", {}).get("content", "")
+        print(f"=== OLLAMA OUTPUT RECEIVED ({len(content)} chars) ===", flush=True)
+        return content
         
     except requests.exceptions.ConnectionError:
         logger.error("Could not connect to Ollama. Is it running? (ollama serve)")

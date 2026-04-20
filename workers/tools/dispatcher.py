@@ -22,6 +22,7 @@ def run_tool(response):
                     tool_input = line.replace("INPUT:", "").strip()
             
             if tool_name:
+                print(f"=== TOOL START: {tool_name} ===", flush=True)
                 logger.info(f"🛠 Dispatching tool: {tool_name} with input: {tool_input}")
                 try:
                     args = json.loads(tool_input) if tool_input else {}
@@ -29,6 +30,7 @@ def run_tool(response):
                     args = {"text": tool_input} # Fallback for non-JSON input
                 
                 result = e2b_tools.execute_tool(tool_name, args)
+                print(f"=== TOOL FINISHED: {tool_name} ===", flush=True)
                 return result
         except Exception as e:
             logger.error(f"Failed to dispatch tool: {e}")

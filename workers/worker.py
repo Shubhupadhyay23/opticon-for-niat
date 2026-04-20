@@ -22,9 +22,9 @@ from tools.dispatcher import run_tool
 logger = logging.getLogger(__name__)
 
 # -- LLM Configuration --
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "dedalus").lower() # "dedalus" or "ollama"
+LLM_PROVIDER = "ollama" # Forced to Ollama for local-native operation
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:11434/v1")
-MODEL = os.environ.get("LLM_MODEL", "claude-3-5-sonnet-20241022" if LLM_PROVIDER == "dedalus" else "llama3.1")
+MODEL = os.environ.get("LLM_MODEL", "llama3.1")
 
 ENABLE_MOCK_LLM = os.environ.get("ENABLE_MOCK_LLM", "false").lower() == "true"
 MAX_STEPS = 500
@@ -155,6 +155,7 @@ async def run_agent_loop(task_description, whiteboard_content="", user_memories=
     """
     Observe-think-act loop using Dedalus chat.completions.create().
     """
+    print("=== EXECUTOR START ===", flush=True)
     if emit_system_log:
         await emit_system_log(f"Entering core loop for model: {MODEL}")
         if ENABLE_MOCK_LLM:
@@ -640,14 +641,12 @@ async def main():
 
             # 1. Multi-Agent Planning Phase
             try:
-                if LLM_PROVIDER == "ollama":
-                    await emit_system_log("🧠 Planning multi-agent strategy...")
-                    plan_data = await asyncio.to_thread(create_plan, task_description, model=MODEL)
-                    tasks = plan_data.get("tasks", [])
-                    await emit_system_log(f"📋 Strategy Created: {len(tasks)} sub-tasks generated.")
-                else:
-                    # Default to single task for other providers (keep it simple for now)
-                    tasks = [{"id": 1, "description": task_description, "agent_type": agent_type}]
+                print("=== PLANNER START ===", flush=True)
+                await emit_system_log("🧠 Planning multi-agent strategy...")
+                plan_data = await asyncio.to_thread(create_plan, task_description, model=MODEL)
+                tasks = plan_data.get("tasks", [])
+                print(f"=== PLANNER OUTPUT: {len(tasks)} tasks ===", flush=True)
+                await emit_system_log(f"📋 Strategy Created: {len(tasks)} sub-tasks generated.")
             except Exception as e:
                 logger.error(f"Planning failed: {e}")
                 tasks = [{"id": 1, "description": task_description, "agent_type": agent_type}]
