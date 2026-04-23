@@ -276,7 +276,14 @@ function SessionContent() {
           currentTaskId: null,
         };
         setAgents((prev) => {
-          if (prev.find((a) => a.id === data.agentId)) return prev;
+          const existing = prev.find((a) => a.id === data.agentId);
+          if (existing) {
+            return prev.map((a) =>
+              a.id === data.agentId
+                ? { ...a, status: "booting" as const, streamUrl: undefined }
+                : a
+            );
+          }
           const updated = [...prev, newAgent];
           setActiveTab((current) => current || updated[0].id);
           return updated;

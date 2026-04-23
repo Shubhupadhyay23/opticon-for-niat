@@ -62,9 +62,11 @@ function BootSequence({ gradient }: { gradient?: string }) {
   useEffect(() => {
     const t1 = setTimeout(() => setPhase(1), 1500);
     const t2 = setTimeout(() => setPhase(2), 3500);
+    const t3 = setTimeout(() => setPhase(3), 5000);
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
+      clearTimeout(t3);
     };
   }, []);
 
@@ -118,7 +120,7 @@ function BootSequence({ gradient }: { gradient?: string }) {
         <div className="w-48 mx-auto h-1 bg-white/5 rounded-full overflow-hidden">
           <div
             className="h-full bg-primary/60 rounded-full transition-all duration-1000 ease-out"
-            style={{ width: `${((phase + 1) / phases.length) * 100}%` }}
+            style={{ width: `${Math.min(100, ((phase + 1) / phases.length) * 100)}%` }}
           />
         </div>
       </div>
