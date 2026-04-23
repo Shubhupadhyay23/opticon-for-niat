@@ -466,9 +466,11 @@ async def main():
         if reconnect_sandbox_id:
             try:
                 print(f"🔄 Attempting to reconnect to sandbox {reconnect_sandbox_id}...", flush=True)
+                await emit_system_log(f"Reconnecting to sandbox {reconnect_sandbox_id}...")
                 desktop = Sandbox(sandbox_id=reconnect_sandbox_id, timeout=3600)
                 desktop.stream.start()
                 stream_url = desktop.stream.get_url()
+                await emit_system_log(f"Reconnected! Stream ready at {stream_url}")
                 await emit("agent:stream_ready", {"streamUrl": stream_url})
                 print(f"✅ Reconnected to sandbox {reconnect_sandbox_id}", flush=True)
             except Exception as e:
@@ -476,16 +478,18 @@ async def main():
                 desktop = None # Fall through to creation logic
         
         if not desktop:
+            await emit_system_log("Connecting to E2B cloud...")
             # Pass resolution to reduce streaming overhead on low-tier infra
-            # Typically supported via kargs in newer e2b-desktop or environmental overrides
-            # We'll try to set the resolution here
             desktop = Sandbox.create(timeout=3600)
             
+            await emit_system_log(f"Sandbox created: {desktop.sandbox_id}")
             # Fallback: force resolution via xrandr inside the sandbox if needed
             try:
                 desktop.run_command("xrandr --size 1280x720")
             except:
                 pass
+            
+            await emit_system_log("Starting desktop stream...")
             # Immediate stream start - don't wait for anything else
             desktop.stream.start()
             # Restore 3s buffer for stream to stabilize
@@ -496,6 +500,7 @@ async def main():
             
             print(f"✅ Sandbox created: {desktop.sandbox_id}. Initializing stream...", flush=True)
             stream_url = desktop.stream.get_url()
+            await emit_system_log(f"Stream ready at {stream_url}")
             await emit("agent:stream_ready", {"streamUrl": stream_url})
             print(f"✅ Stream active at {stream_url}", flush=True)
             
